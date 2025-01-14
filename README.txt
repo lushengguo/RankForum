@@ -1,6 +1,10 @@
 # RankForum
 
 A decentralized forum where everyone has their score in some topic/field
+
+Decenteralized is easy to understand, which means community autonomy and 
+without platform censorship
+
 Which would give them privilege in that topic/field. Consider forums nowadays,
 everyone is able to publish posts and comments. It's a good thing which means
 everybody can enjoy the benefits of the internet. But it's also annoying that
@@ -18,10 +22,14 @@ down-votes. Consider log{100}(score) as your level, and your score changes like
 the pseudo code below:
 
 if received_up_vote:
-    score += min(100^your_level * 10, 100^upvoter's_level)
+    score += min(100^poster_level * 10, 100^upvoter_level)
 else received_down_vote:
-    score -= min(100^your_level * 10, 100^upvoter's_level)
-    if score < 0:
+    negative_score = min(100^poster_level * 10, 100^upvoter_level)
+    total_score_from_this_post -= negative_score
+    if level(total_score_from_this_post) > poster_level:
+        ban_account(poster)
+        return
+    if poster_score < negative_score:
         score = 0
 
 eg:
