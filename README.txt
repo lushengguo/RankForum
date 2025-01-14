@@ -5,7 +5,7 @@ A decentralized forum where everyone has their score in some topic/field
 Decenteralized is easy to understand, which means community autonomy and 
 without platform censorship
 
-Which would give them privilege in that topic/field. Consider forums nowadays,
+Score would authorize influence in that topic/field. Consider forums nowadays,
 everyone is able to publish posts and comments. It's a good thing which means
 everybody can enjoy the benefits of the internet. But it's also annoying that
 so many meaningless posts mess up your application. And someone who is not
