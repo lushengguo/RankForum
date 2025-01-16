@@ -7,33 +7,62 @@ use rankforum::score;
 use rankforum::user;
 
 use env_logger;
+use rouille::*;
 
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
-use std::convert::Infallible;
-use std::net::SocketAddr;
-
-async fn handle_request(_req: Request<Body>) -> Result<Response<Body>, Infallible> {
-    Ok(Response::new(Body::from("Hello, World!")))
-}
-
-#[tokio::main]
-async fn main() {
+fn main() {
     env_logger::init();
 
-    // Define the address to bind the server to
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    rouille::start_server("localhost:8000", move |request| {
+        rouille::log(request, std::io::stdout(), || {
+            router!(request,
+                (GET) (/) => {
+                    // When viewing the home page, we return an HTML document described below.
+                    rouille::Response::html(FORM)
+                },
+                (GET) (/posts) => {
+                    rouille::Response::html(FORM)
+                },
+                (POST) (/submit) => {
+                    // This is the route that is called when the user submits the form of the
+                    // home page.
 
-    // Create a service that handles incoming requests
-    let make_svc =
-        make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle_request)) });
+                    // We query the data with the `post_input!` macro. Each field of the macro
+                    // corresponds to an element of the form.
+                    // If the macro returns an error (for example if a field is missing, which
+                    // can happen if you screw up the form or if the user made a manual request)
+                    // we return a 400 response.
+                    let data = try_or_400!(post_input!(request, {
+                        txt: String,
+                        files: Vec<rouille::input::post::BufferedFile>,
+                    }));
 
-    // Create the server
-    let server = Server::bind(&addr).serve(make_svc);
+                    // We just print what was received on stdout. Of course in a real application
+                    // you probably want to process the data, eg. store it in a database.
+                    println!("Received data: {:?}", data);
 
-    // Run the server
-    println!("Listening on http://{}", addr);
-    if let Err(e) = server.await {
-        eprintln!("Server error: {}", e);
-    }
+                    rouille::Response::html("Success! <a href=\"/\">Go back</a>.")
+                },
+
+                _ => rouille::Response::empty_404()
+            )
+        })
+    });
 }
+
+// The HTML document of the home page.
+static FORM: &str = r#"
+<html>
+    <head>
+        <title>Form</title>
+    </head>
+    <body>
+        <form action="submit" method="POST" enctype="multipart/form-data">
+            <p><input type="text" name="txt" placeholder="Some text" /></p>
+
+            <p><input type="file" name="files" multiple /></p>
+
+            <p><button>Upload</button></p>
+        </form>
+    </body>
+</html>
+"#;
