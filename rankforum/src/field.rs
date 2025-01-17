@@ -1,8 +1,12 @@
+use std::ops::Add;
+
 use crate::db::DB;
 use crate::post::Post;
+use crate::Address;
 
 pub struct Field {
     pub name: String,
+    pub address: String,
 }
 
 pub struct FilterOption {
@@ -15,14 +19,12 @@ pub struct FilterOption {
 
 impl Field {
     // load from db to memory as cache
-    fn load(name: String) -> Field {
-        Field { name }
-    }
+    fn save_to_db(&self) {DB::}
 
     // create new field instance
-    fn new(name: String) -> Field {
+    fn new(name: String, address: Address) -> Field {
         // save to db
-        Field { name }
+        Field { name, address }
     }
 
     fn filter_posts(&self, mut option: FilterOption) -> Vec<Post> {

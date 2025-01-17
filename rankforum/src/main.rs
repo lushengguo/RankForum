@@ -22,23 +22,8 @@ fn main() {
                 (GET) (/posts) => {
                     rouille::Response::html(FORM)
                 },
-                (POST) (/submit) => {
-                    // This is the route that is called when the user submits the form of the
-                    // home page.
-
-                    // We query the data with the `post_input!` macro. Each field of the macro
-                    // corresponds to an element of the form.
-                    // If the macro returns an error (for example if a field is missing, which
-                    // can happen if you screw up the form or if the user made a manual request)
-                    // we return a 400 response.
-                    let data = try_or_400!(post_input!(request, {
-                        txt: String,
-                        files: Vec<rouille::input::post::BufferedFile>,
-                    }));
-
-                    // We just print what was received on stdout. Of course in a real application
-                    // you probably want to process the data, eg. store it in a database.
-                    println!("Received data: {:?}", data);
+                (POST) (/create_field) => {
+                    db::DB::create_field(&request);
 
                     rouille::Response::html("Success! <a href=\"/\">Go back</a>.")
                 },

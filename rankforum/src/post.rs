@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::db::*;
+use crate::field::Field;
 use crate::score::calculate_vote_impact;
 use crate::user::level;
 use crate::{generate_address, Address};
@@ -9,19 +10,18 @@ use chrono::Utc;
 use log::{error, warn};
 
 pub struct Comment {
+    pub address: Address,
     pub from: Address,
-    // every post have a uid, this target could be user or post
     pub to: Address,
 
     // score reflects value of this comment, the highest score comment will be shown first
     // and it's able to be negative
     pub score: i64,
-    pub upvote_sub_downvote: i64,
+    pub upvote: u64,
+    pub downvote: u64,
 
     pub content: String,
     pub timestamp: i64,
-
-    pub id: Address,
 }
 
 impl Comment {
@@ -30,10 +30,11 @@ impl Comment {
             from,
             to,
             score: 0,
-            upvote_sub_downvote: 0,
+            upvote: 0,
+            downvote: 0,
             content,
             timestamp: Utc::now().timestamp(),
-            id: generate_address(),
+            address: generate_address(),
         };
 
         DB::update_comment(&comment);
@@ -42,12 +43,12 @@ impl Comment {
 
     fn calculate_vote_impact(&self, voter: &Address) -> i64 {
         // this would not fail, if failed means db is corrupted or code bug
-        let field = DB::field(&self.to).unwrap();
+        let field = DB::field_by_address(&self.to).unwrap();
 
-        let voter_score = match DB::score(&field, &voter) {
+        let voter_score = match DB::score(&field.address, &voter) {
             Some(score) => score,
             None => {
-                warn!("User {} not found in field {}", self.from, field);
+                warn!("User {} not found in field {}", self.from, field.address);
                 return 0;
             }
         };
@@ -64,7 +65,7 @@ impl Comment {
             return;
         }
         self.score += impact;
-        self.upvote_sub_downvote += 1;
+        self.upvote += 1;
         DB::update_comment(&self);
     }
 
@@ -75,7 +76,7 @@ impl Comment {
             return;
         }
         self.score -= impact;
-        self.upvote_sub_downvote -= 1;
+        self.downvote += 1;
         DB::update_comment(&self);
     }
 }
@@ -83,24 +84,34 @@ impl Comment {
 type DirectCommentAddress = Address;
 type InDirectCommentAddress = Address;
 pub struct Post {
-    pub id: Address,
+    pub address: Address,
     pub from: Address,
+    pub to: Address,
+
     pub title: String,
     pub content: String,
     pub score: i64,
-    pub upvote_sub_downvote: i64,
+    pub upvote: u64,
+    pub downvote: u64,
+    pub timestamp: i64,
+
+    // comments are lazy to load in memory
+    // only queried comments will be loaded
     pub comments: HashMap<DirectCommentAddress, HashSet<InDirectCommentAddress>>,
 }
 
 impl Post {
-    pub fn new(from: &String, title: String, content: String) -> Post {
+    pub fn new(from: Address, field_address: Address, title: String, content: String) -> Post {
         let post = Post {
-            id: generate_address(),
+            address: generate_address(),
             from: from.clone(),
+            to: field_address,
             title,
             content,
             score: 0,
-            upvote_sub_downvote: 0,
+            upvote: 0,
+            downvote: 0,
+            timestamp: Utc::now().timestamp(),
             comments: HashMap::new(),
         };
 
@@ -110,12 +121,12 @@ impl Post {
 
     fn calculate_vote_impact(&self, voter: &Address) -> i64 {
         // this would not fail, if failed means db is corrupted or code bug
-        let field = DB::field(&self.id).unwrap();
+        let field = DB::field_by_address(&self.address).unwrap();
 
-        let voter_score = match DB::score(&field, &voter) {
+        let voter_score = match DB::score(&field.address, &voter) {
             Some(score) => score,
             None => {
-                warn!("User {} not found in field {}", self.from, field);
+                warn!("User {} not found in field {}", self.from, field.address);
                 return 0;
             }
         };
@@ -132,7 +143,7 @@ impl Post {
             return;
         }
         self.score += impact;
-        self.upvote_sub_downvote += 1;
+        self.upvote += 1;
         DB::update_post(&self);
     }
 
@@ -143,16 +154,16 @@ impl Post {
             return;
         }
         self.score -= impact;
-        self.upvote_sub_downvote -= 1;
+        self.downvote += 1;
         DB::update_post(&self);
     }
 
     pub fn comment(&mut self, comment: &String, from: &Address) {
-        let comment = Comment::new(from.clone(), self.id.clone(), comment.clone());
+        let comment = Comment::new(from.clone(), self.address.clone(), comment.clone());
         self.comments
-            .entry(comment.id.clone())
+            .entry(comment.address.clone())
             .or_insert(HashSet::new())
-            .insert(comment.id.clone());
+            .insert(comment.address.clone());
         DB::update_post(&self);
     }
 
@@ -161,7 +172,7 @@ impl Post {
         self.comments
             .entry(to.clone())
             .or_insert(HashSet::new())
-            .insert(comment.id.clone());
+            .insert(comment.address.clone());
         DB::update_post(&self);
     }
 }
