@@ -19,15 +19,17 @@ pub struct FilterOption {
 
 impl Field {
     // load from db to memory as cache
-    fn save_to_db(&self) {DB::}
+    pub fn save_to_db(&self) {
+        DB::save_field(&self);
+    }
 
     // create new field instance
-    fn new(name: String, address: Address) -> Field {
+    pub fn new(name: String, address: Address) -> Field {
         // save to db
         Field { name, address }
     }
 
-    fn filter_posts(&self, mut option: FilterOption) -> Vec<Post> {
+    pub fn filter_posts(&self, mut option: FilterOption) -> Vec<Post> {
         if option.max_results > 100 {
             option.max_results = 100;
         }

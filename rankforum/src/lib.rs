@@ -3,7 +3,8 @@ pub mod field;
 pub mod post;
 pub mod score;
 pub mod user;
-pub mod server;
+pub mod service;
+pub mod crypto;
 use uuid::Uuid;
 
 pub type Address = String;

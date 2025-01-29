@@ -8,14 +8,14 @@ pub fn level(score: i64) -> u8 {
 
 pub struct User {
     pub address: Address,
-    pub username: String,
+    pub name: String,
 }
 
 impl User {
-    pub fn new(username: String) -> User {
+    pub fn new(name: String) -> User {
         User {
             address: generate_address(),
-            username,
+            name,
         }
     }
 }

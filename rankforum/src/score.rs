@@ -6,3 +6,7 @@ pub fn calculate_vote_impact(poster_level: u8, voter_level: u8) -> i64 {
     }
     return voter_level_score;
 }
+
+pub fn minimal_score_of_level(level: u8) -> i64 {
+    (100 as u64).pow(level as u32) as i64
+}

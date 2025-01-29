@@ -43,7 +43,7 @@ impl Comment {
 
     fn calculate_vote_impact(&self, voter: &Address) -> i64 {
         // this would not fail, if failed means db is corrupted or code bug
-        let field = DB::field_by_address(&self.to).unwrap();
+        let field = DB::field(None, Some(self.to.clone())).unwrap();
 
         let voter_score = match DB::score(&field.address, &voter) {
             Some(score) => score,
@@ -121,7 +121,7 @@ impl Post {
 
     fn calculate_vote_impact(&self, voter: &Address) -> i64 {
         // this would not fail, if failed means db is corrupted or code bug
-        let field = DB::field_by_address(&self.address).unwrap();
+        let field = DB::field(None, Some(self.address.clone())).unwrap();
 
         let voter_score = match DB::score(&field.address, &voter) {
             Some(score) => score,
@@ -131,7 +131,7 @@ impl Post {
             }
         };
         let voter_level = level(voter_score);
-        let self_level = level(self.score);
+        let self_level = level(self.score); 
 
         calculate_vote_impact(self_level, voter_level)
     }
