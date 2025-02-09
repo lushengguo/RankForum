@@ -7,39 +7,42 @@ use crate::Address;
 
 use lazy_static::lazy_static;
 use log::{error, info, warn};
-use rusqlite::{params, params_from_iter, Connection, Error, Result};
+use rusqlite::{params, params_from_iter, Connection, Result};
 use std::collections::HashMap;
-use std::ops::Add;
 use std::sync::{Arc, Mutex};
 
 pub struct DB {
-    conn: rusqlite::Connection,
+    conn: Mutex<rusqlite::Connection>,
 }
 
 lazy_static! {
-    pub static ref GLOBAL_DB: Arc<Mutex<DB>> = {
+    pub static ref GLOBAL_DB: Arc<DB> = {
         let db = DB::new("database.sqlite").expect("Failed to initialize database");
         db.init().expect("Failed to initialize database schema");
-        Arc::new(Mutex::new(db))
+        Arc::new(db)
     };
+}
+
+pub fn global_db()-> Arc<DB> {
+    GLOBAL_DB.clone()
 }
 
 impl DB {
     fn new(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
-        Ok(DB { conn })
+        Ok(DB { conn: Mutex::new(conn) })
     }
 
     pub fn init(&self) -> Result<()> {
         // Check and create 'user' table
-        let user_table_exists: bool = self.conn.query_row(
+        let user_table_exists: bool = self.conn.lock().unwrap().query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='user');",
             params![],
             |row| row.get(0),
         )?;
 
         if !user_table_exists {
-            self.conn.execute(
+            self.conn.lock().unwrap().execute(
                 "CREATE TABLE IF NOT EXISTS user (
                     address TEXT PRIMARY KEY, 
                     name TEXT NOT NULL
@@ -49,14 +52,14 @@ impl DB {
         }
 
         // Check and create 'fields' table
-        let fields_table_exists: bool = self.conn.query_row(
+        let fields_table_exists: bool = self.conn.lock().unwrap().query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='fields');",
             params![],
             |row| row.get(0),
         )?;
 
         if !fields_table_exists {
-            self.conn.execute(
+            self.conn.lock().unwrap().execute(
                 "CREATE TABLE IF NOT EXISTS fields (
                     address TEXT PRIMARY KEY, 
                     name TEXT NOT NULL
@@ -66,14 +69,14 @@ impl DB {
         }
 
         // Check and create 'score' table
-        let score_table_exists: bool = self.conn.query_row(
+        let score_table_exists: bool = self.conn.lock().unwrap().query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='score');",
             params![],
             |row| row.get(0),
         )?;
 
         if !score_table_exists {
-            self.conn.execute(
+            self.conn.lock().unwrap().execute(
                 "CREATE TABLE IF NOT EXISTS score (
             address TEXT PRIMARY KEY,
             field_address TEXT NOT NULL,
@@ -85,14 +88,14 @@ impl DB {
         }
 
         // Check and create 'post_and_comment' table
-        let post_and_comment_table_exists: bool = self.conn.query_row(
+        let post_and_comment_table_exists: bool = self.conn.lock().unwrap().query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='post_and_comment');",
             params![],
             |row| row.get(0),
         )?;
 
         if !post_and_comment_table_exists {
-            self.conn.execute(
+            self.conn.lock().unwrap().execute(
                 "CREATE TABLE IF NOT EXISTS post_and_comment (
             address TEXT PRIMARY KEY,
             from_address TEXT NOT NULL,
@@ -109,14 +112,14 @@ impl DB {
         }
 
         // Check and create 'votes' table
-        let votes_table_exists: bool = self.conn.query_row(
+        let votes_table_exists: bool = self.conn.lock().unwrap().query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='votes');",
             params![],
             |row| row.get(0),
         )?;
 
         if !votes_table_exists {
-            self.conn.execute(
+            self.conn.lock().unwrap().execute(
                 "CREATE TABLE IF NOT EXISTS votes (
                         to_address TEXT PRIMARY KEY,
                         from_address TEXT NOT NULL,
@@ -132,15 +135,14 @@ impl DB {
     }
 
     pub fn upvote(
+        &self,
         from: &Address,
         to: &Address,
         from_score: i64,
         to_score: i64,
         voted_score: i64,
     ) -> Result<(), String> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        match _db.conn.execute(
+        match self.conn.lock().unwrap().execute(
             "INSERT OR REPLACE INTO votes (to_address, from_address, from_score_snapshot, to_score_snapshot, voted_score) 
             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![to, from, from_score, to_score, voted_score],
@@ -155,21 +157,21 @@ impl DB {
 
     // voted score could be negative
     pub fn downvote(
+        &self,
         from: &Address,
         to: &Address,
         from_score: i64,
         to_score: i64,
         voted_score: i64,
     ) -> Result<(), String> {
-        Self::upvote(from, to, from_score, to_score, voted_score)
+        self.upvote(from, to, from_score, to_score, voted_score)
     }
 
-    pub fn rename(address: Address, name: String) -> Result<(), String> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-
-        let name_exists: bool = _db
+    pub fn rename(&self, address: Address, name: String) -> Result<(), String> {
+        let name_exists: bool = self
             .conn
+            .lock()
+            .unwrap()
             .query_row(
                 "SELECT EXISTS(SELECT * FROM user WHERE name=(?1))",
                 params![name],
@@ -182,7 +184,7 @@ impl DB {
             return Err("Name already exists".to_string());
         }
 
-        match _db.conn.execute(
+        match self.conn.lock().unwrap().execute(
             "INSERT OR REPLACE INTO user (address, name) VALUES (?1, ?2)",
             params![address, name],
         ) {
@@ -194,10 +196,8 @@ impl DB {
         }
     }
 
-    pub fn user(name: Option<String>, address: Option<Address>) -> Option<User> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        match _db.conn.query_row(
+    pub fn user(&self, name: Option<String>, address: Option<Address>) -> Option<User> {
+        match self.conn.lock().unwrap().query_row(
             "SELECT name, address FROM user WHERE name = ?1 OR address = ?2",
             params![name, address],
             |row| {
@@ -217,10 +217,9 @@ impl DB {
 
     // pub fn user_in_field(&Option<>)
 
-    pub fn all_fields() -> Vec<Field> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        let mut stmt = _db.conn.prepare("SELECT address, name FROM fields").unwrap();
+    pub fn all_fields(&self) -> Vec<Field> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT address, name FROM fields").unwrap();
         let field_iter = stmt.query_map([], |row| {
             Ok(Field {
                 address: row.get(0)?,
@@ -236,10 +235,8 @@ impl DB {
         fields
     }
 
-    pub fn score(field_address: &Address, target_address: &Address) -> Option<i64> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        match _db.conn.query_row(
+    pub fn score(&self, field_address: &Address, target_address: &Address) -> Option<i64> {
+        match self.conn.lock().unwrap().query_row(
             "SELECT score FROM score WHERE field_address = ?1 AND address = ?2",
             params![field_address, target_address],
             |row| Ok(row.get(0)?),
@@ -252,10 +249,8 @@ impl DB {
         }
     }
 
-    pub fn persist_score(field: &String, address: &Address, name: Option<String>, score: i64) {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        match _db.conn.execute(
+    pub fn persist_score(&self, field: &String, address: &Address, name: Option<String>, score: i64) {
+        match self.conn.lock().unwrap().execute(
             "INSERT OR REPLACE INTO score (address, field_address, name, score) VALUES (?1, ?2, ?3, ?4)",
             params![address, field, name, score],
         ) {
@@ -264,10 +259,8 @@ impl DB {
         }
     }
 
-    pub fn comment(address: &Address) -> Option<Comment> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        match _db.conn.query_row(
+    pub fn comment(&self, address: &Address) -> Option<Comment> {
+        match self.conn.lock().unwrap().query_row(
             "SELECT address, from_address, to_address, content, score, timestamp, upvote, downvote 
             FROM post_and_comment WHERE address = ?1",
             params![address],
@@ -292,25 +285,21 @@ impl DB {
         }
     }
 
-    fn create_user_if_not_exist(address: &Address) -> Result<User, String> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        match _db
-            .conn
-            .query_row("SELECT name FROM user WHERE address = ?1", params![address], |row| {
-                row.get(0)
-            }) {
+    fn create_user_if_not_exist(&self, address: &Address) -> Result<User, String> {
+        let conn = self.conn.lock().unwrap();
+        match conn.query_row("SELECT name FROM user WHERE address = ?1", params![address], |row| {
+            row.get(0)
+        }) {
             Ok(name) => Ok(User {
                 address: address.clone(),
                 name,
             }),
             Err(_) => {
-                _db.conn
-                    .execute(
-                        "INSERT INTO user (address, name) VALUES (?1, ?2)",
-                        params![address, generate_name()],
-                    )
-                    .map_err(|err| err.to_string())?;
+                conn.execute(
+                    "INSERT INTO user (address, name) VALUES (?1, ?2)",
+                    params![address, generate_name()],
+                )
+                .map_err(|err| err.to_string())?;
 
                 Ok(User {
                     address: address.clone(),
@@ -322,13 +311,11 @@ impl DB {
 
     // this allow anonymous user's post
     // and record this user in db with a random name
-    pub fn persist_comment(comment: &Comment) -> Result<(), String> {
-        Self::create_user_if_not_exist(&comment.from)?;
-        Self::post(comment.to.clone())?;
+    pub fn persist_comment(&self, comment: &Comment) -> Result<(), String> {
+        self.create_user_if_not_exist(&comment.from)?;
+        self.post(comment.to.clone())?;
 
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        match _db.conn.execute(
+        match self.conn.lock().unwrap().execute(
             "INSERT OR REPLACE INTO post_and_comment (address, from_address, to_address, title, content, score, timestamp, upvote, downvote) 
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
@@ -354,10 +341,8 @@ impl DB {
         }
     }
 
-    pub fn post(address: Address) -> Result<Post, String> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        match _db.conn.query_row(
+    pub fn post(&self, address: Address) -> Result<Post, String> {
+        match self.conn.lock().unwrap().query_row(
             "SELECT address, from_address, to_address, title, content, score, timestamp, upvote, downvote FROM post_and_comment WHERE address = ?1",
             params![address],
             |row| {
@@ -385,13 +370,11 @@ impl DB {
 
     // this allow anonymous user's post
     // and record this user in db with a random name
-    pub fn persist_post(post: &Post) -> Result<(), String> {
-        Self::field(None, Some(post.to.clone()))?;
-        Self::create_user_if_not_exist(&post.from)?;
+    pub fn persist_post(&self, post: &Post) -> Result<(), String> {
+        self.field(None, Some(post.to.clone()))?;
+        self.create_user_if_not_exist(&post.from)?;
 
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        match _db.conn.execute(
+        match self.conn.lock().unwrap().execute(
             "INSERT OR REPLACE INTO post_and_comment (address, from_address, to_address, title, content, score, timestamp, upvote, downvote) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![post.address, post.from, post.to, post.title, post.content, post.score, post.timestamp, post.upvote, post.downvote],
         ) {
@@ -403,10 +386,8 @@ impl DB {
         }
     }
 
-    pub fn persist_field(field: &Field) -> Result<(), String> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        match _db.conn.execute(
+    pub fn persist_field(&self, field: &Field) -> Result<(), String> {
+        match self.conn.lock().unwrap().execute(
             "INSERT OR REPLACE INTO fields (address, name) VALUES (?1, ?2)",
             params![field.address, field.name],
         ) {
@@ -421,11 +402,9 @@ impl DB {
         }
     }
 
-    pub fn field(name: Option<String>, address: Option<Address>) -> Result<Field, String> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
+    pub fn field(&self, name: Option<String>, address: Option<Address>) -> Result<Field, String> {
         if name.is_some() {
-            match _db.conn.query_row(
+            match self.conn.lock().unwrap().query_row(
                 "SELECT address, name FROM fields WHERE name = ?1",
                 params![name],
                 |row| {
@@ -449,7 +428,7 @@ impl DB {
                 }
             }
         } else {
-            match _db.conn.query_row(
+            match self.conn.lock().unwrap().query_row(
                 "SELECT address, name FROM fields WHERE address = ?1",
                 params![address],
                 |row| {
@@ -468,10 +447,8 @@ impl DB {
         }
     }
 
-    pub fn field_by_address(comment_or_post_id: &Address) -> Option<Field> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        match _db.conn.query_row(
+    pub fn field_by_address(&self, comment_or_post_id: &Address) -> Option<Field> {
+        match self.conn.lock().unwrap().query_row(
             "SELECT address, name FROM fields WHERE address = ?1",
             params![comment_or_post_id],
             |row| {
@@ -489,10 +466,8 @@ impl DB {
         }
     }
 
-    pub fn filter_posts(field: &String, option: &FilterOption) -> Vec<Post> {
-        let db = GLOBAL_DB.clone();
-        let _db = db.lock().unwrap();
-        let address = match DB::field(Some(field.clone()), None) {
+    pub fn filter_posts(&self, field: &String, option: &FilterOption) -> Vec<Post> {
+        let address = match self.field(Some(field.clone()), None) {
             Ok(field) => field.address,
             Err(e) => {
                 warn!("Field not found, error: {}", e);
@@ -535,7 +510,8 @@ impl DB {
         sql.push_str(" LIMIT ?");
         params.push(&option.max_results);
 
-        let mut stmt = _db.conn.prepare(&sql).unwrap();
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&sql).unwrap();
         let post_iter = stmt
             .query_map(params_from_iter(params.iter()), |row| {
                 Ok(Post {
@@ -568,61 +544,63 @@ mod tests {
     use crate::generate_address;
     use crate::generate_name;
 
-    fn drop_all_tables() -> std::io::Result<()> {
+    fn drop_db(db_path: &str) -> std::io::Result<()> {
         // remove database.sqlite
-        std::fs::remove_file("database.sqlite")
+        std::fs::remove_file(db_path)
     }
 
-    fn reset_db() {
-        drop_all_tables().unwrap();
-        let db = DB::new("database.sqlite").expect("Failed to initialize database");
+    fn new_db() -> DB {
+        let random_name = generate_name();
+        let db_path = format!("target/{}.sqlite", random_name);
+
+        let db = DB::new(&db_path).expect("Failed to initialize database");
         db.init().expect("Failed to initialize database schema");
-        let mut global_db = GLOBAL_DB.lock().unwrap();
-        *global_db = db;
+
+        db
     }
 
     #[test]
     fn test_create_field() {
-        reset_db();
+        let db = new_db();
 
         let field = Field {
             address: generate_address(),
             name: generate_name(),
         };
-        let persist_result = DB::persist_field(&field);
+        let persist_result = db.persist_field(&field);
         assert!(persist_result.is_ok());
 
-        let field = DB::field(Some(field.name.clone()), None).unwrap();
+        let field = db.field(Some(field.name.clone()), None).unwrap();
         assert_eq!(field.address, field.address);
     }
 
     #[test]
     fn test_register_and_rename_user() {
-        reset_db();
+        let db = new_db();
 
         let user = User::new(generate_address(), generate_name());
-        let register_result = DB::rename(user.address.clone(), user.name.clone());
+        let register_result = db.rename(user.address.clone(), user.name.clone());
         assert!(register_result.is_ok());
 
-        let user = DB::user(Some(user.name.clone()), None).unwrap();
+        let user = db.user(Some(user.name.clone()), None).unwrap();
         assert_eq!(user.address, user.address);
 
         let new_name = generate_name();
-        let rename_result = DB::rename(user.address.clone(), new_name.clone());
+        let rename_result = db.rename(user.address.clone(), new_name.clone());
         assert!(rename_result.is_ok());
 
-        let user = DB::user(None, Some(user.address.clone())).unwrap();
+        let user = db.user(None, Some(user.address.clone())).unwrap();
         assert_eq!(user.name, new_name);
     }
 
-    fn create_field(address: &Address, name: &String) -> Result<Field, String> {
+    fn create_field(db: &DB, address: &Address, name: &String) -> Result<Field, String> {
         let field = Field {
             address: address.clone(),
             name: name.clone(),
         };
-        match DB::persist_field(&field) {
+        match db.persist_field(&field) {
             Ok(_) => {
-                let field2 = DB::field(Some(field.name.clone()), None).unwrap();
+                let field2 = db.field(Some(field.name.clone()), None).unwrap();
                 assert!(field == field2);
                 Ok(field)
             }
@@ -630,16 +608,16 @@ mod tests {
         }
     }
 
-    fn post(field_address: &Address) -> Result<Post, String> {
+    fn post(db: &DB, field_address: &Address) -> Result<Post, String> {
         let post = Post::new(
             generate_address(),
             field_address.clone(),
             generate_name(),
             generate_name(),
         );
-        match DB::persist_post(&post) {
+        match db.persist_post(&post) {
             Ok(_) => {
-                let post2 = DB::post(post.address.clone()).unwrap();
+                let post2 = db.post(post.address.clone()).unwrap();
                 assert!(post == post2);
                 Ok(post)
             }
@@ -647,7 +625,7 @@ mod tests {
         }
     }
 
-    fn comment(to: &Address) -> Result<Comment, String> {
+    fn comment(db: &DB, to: &Address) -> Result<Comment, String> {
         let comment = Comment {
             address: generate_address(),
             from: generate_address(),
@@ -658,9 +636,9 @@ mod tests {
             upvote: 0,
             downvote: 0,
         };
-        match DB::persist_comment(&comment) {
+        match db.persist_comment(&comment) {
             Ok(_) => {
-                let comment2 = DB::comment(&comment.address.clone()).unwrap();
+                let comment2 = db.comment(&comment.address.clone()).unwrap();
                 assert!(comment == comment2);
                 Ok(comment)
             }
@@ -670,49 +648,49 @@ mod tests {
 
     #[test]
     fn test_post_on_not_exist_field() {
-        reset_db();
+        let db = new_db();
 
         let field = Field {
             address: generate_address(),
             name: generate_name(),
         };
 
-        assert!(post(&field.address).is_err());
+        assert!(post(&db, &field.address).is_err());
     }
 
     #[test]
     fn test_post_on_exist_field() {
-        reset_db();
+        let db = new_db();
 
-        let field = create_field(&generate_address(), &generate_name()).unwrap();
-        assert!(post(&field.address).is_ok());
+        let field = create_field(&db, &generate_address(), &generate_name()).unwrap();
+        assert!(post(&db, &field.address).is_ok());
     }
 
     #[test]
     fn test_comment_on_invalid_address() {
-        reset_db();
+        let db = new_db();
 
-        let result = comment(&generate_address());
+        let result = comment(&db, &generate_address());
         assert!(result.is_err());
     }
 
     #[test]
     fn test_comment_on_post() {
-        reset_db();
+        let db = new_db();
 
-        let field = create_field(&generate_address(), &generate_name()).unwrap();
-        let post = post(&field.address).unwrap();
-        comment(&post.address).unwrap();
+        let field = create_field(&db, &generate_address(), &generate_name()).unwrap();
+        let post = post(&db, &field.address).unwrap();
+        comment(&db, &post.address).unwrap();
     }
 
     #[test]
     fn test_comment_on_comment() {
-        reset_db();
+        let db = new_db();
 
-        let field = create_field(&generate_address(), &generate_name()).unwrap();
-        let post = post(&field.address).unwrap();
-        let comment1 = comment(&post.address).unwrap();
-        comment(&comment1.address).unwrap();
+        let field = create_field(&db, &generate_address(), &generate_name()).unwrap();
+        let post = post(&db, &field.address).unwrap();
+        let comment1 = comment(&db, &post.address).unwrap();
+        comment(&db, &comment1.address).unwrap();
     }
 
     #[test]

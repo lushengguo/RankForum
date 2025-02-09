@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::db::*;
-use crate::field::Field;
+use crate::db::global_db;
 use crate::score::calculate_vote_score;
 use crate::user::level;
 use crate::{generate_address, Address};
@@ -42,14 +41,14 @@ impl Comment {
     }
 
     pub fn persist(&self) -> Result<(), String> {
-        DB::persist_comment(&self)
+        global_db().persist_comment(&self)
     }
 
     fn calculate_vote_score(&self, voter: &Address) -> i64 {
         // this would not fail, if failed means db is corrupted or code bug
-        let field = DB::field(None, Some(self.to.clone())).unwrap();
+        let field = global_db().field(None, Some(self.to.clone())).unwrap();
 
-        let voter_score = match DB::score(&field.address, &voter) {
+        let voter_score = match global_db().score(&field.address, &voter) {
             Some(score) => score,
             None => {
                 warn!("User {} not found in field {}", self.from, field.address);
@@ -70,7 +69,7 @@ impl Comment {
         }
         self.score += vote_score;
         self.upvote += 1;
-        DB::persist_comment(&self);
+        global_db().persist_comment(&self);
     }
 
     pub fn downvote(&mut self, downvoter: &Address) {
@@ -81,7 +80,7 @@ impl Comment {
         }
         self.score -= vote_score;
         self.downvote += 1;
-        DB::persist_comment(&self);
+        global_db().persist_comment(&self);
     }
 }
 
@@ -124,14 +123,14 @@ impl Post {
     }
 
     pub fn persist(&self) -> Result<(), String> {
-        DB::persist_post(&self)
+        global_db().persist_post(&self)
     }
 
     fn calculate_vote_score(&self, voter: &Address) -> i64 {
         // this would not fail, if failed means db is corrupted or code bug
-        let field = DB::field(None, Some(self.address.clone())).unwrap();
+        let field = global_db().field(None, Some(self.address.clone())).unwrap();
 
-        let voter_score = match DB::score(&field.address, &voter) {
+        let voter_score = match global_db().score(&field.address, &voter) {
             Some(score) => score,
             None => {
                 warn!("User {} not found in field {}", self.from, field.address);
@@ -152,7 +151,7 @@ impl Post {
         }
         self.score += vote_score;
         self.upvote += 1;
-        DB::persist_post(&self);
+        global_db().persist_post(&self);
     }
 
     pub fn downvote(&mut self, downvoter: &Address) {
@@ -163,7 +162,7 @@ impl Post {
         }
         self.score -= vote_score;
         self.downvote += 1;
-        DB::persist_post(&self);
+        global_db().persist_post(&self);
     }
 
     pub fn comment(&mut self, comment: &String, from: &Address) {
@@ -172,7 +171,7 @@ impl Post {
             .entry(comment.address.clone())
             .or_insert(HashSet::new())
             .insert(comment.address.clone());
-        DB::persist_post(&self);
+        global_db().persist_post(&self);
     }
 
     pub fn comment_on_comment(&mut self, comment: &String, from: &Address, to: &Address) {
@@ -181,6 +180,6 @@ impl Post {
             .entry(to.clone())
             .or_insert(HashSet::new())
             .insert(comment.address.clone());
-        DB::persist_post(&self);
+        global_db().persist_post(&self);
     }
 }

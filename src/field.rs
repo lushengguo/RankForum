@@ -1,6 +1,5 @@
-use std::ops::Add;
 
-use crate::db::DB;
+use crate::db::global_db;
 use crate::post::Post;
 use crate::Address;
 
@@ -21,7 +20,7 @@ pub struct FilterOption {
 impl Field {
     // load from db to memory as cache
     pub fn save_to_db(&self) {
-        DB::persist_field(&self);
+        global_db().persist_field(&self);
     }
 
     // create new field instance
@@ -34,6 +33,6 @@ impl Field {
         if option.max_results > 100 {
             option.max_results = 100;
         }
-        DB::filter_posts(&self.name, &option)
+        global_db().filter_posts(&self.name, &option)
     }
 }

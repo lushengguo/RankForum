@@ -1,5 +1,4 @@
-use crate::db::*;
-use crate::generate_address;
+use crate::db::global_db;
 use crate::Address;
 
 pub fn level(score: i64) -> u8 {
@@ -18,6 +17,6 @@ impl User {
 
     pub fn rename(&mut self, new_name: String) -> Result<(), String> {
         self.name = new_name;
-        DB::rename(self.address.clone(), self.name.clone())
+        global_db().rename(self.address.clone(), self.name.clone())
     }
 }
