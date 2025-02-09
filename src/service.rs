@@ -63,9 +63,7 @@ fn address(request: &Request) -> Option<Address> {
 
 fn user_already_logined(request: &Request) -> bool {
     match get_session_cache(request) {
-        Some(cache) => {
-            cache.logined
-        }
+        Some(cache) => cache.logined,
         None => false,
     }
 }
@@ -117,12 +115,12 @@ fn query_score_in_field(request: &Request) -> Response {
         return Response::text("field not found").with_status_code(404);
     }
 
-    let score = global_db().score(&field.unwrap().address, &user.unwrap().address);
-    if score.is_none() {
+    let score = global_db().select_score(&field.unwrap().address, &user.unwrap().address);
+    if score.is_ok() {
         return Response::text("score not found").with_status_code(404);
     }
 
-    Response::text(score.unwrap().to_string())
+    Response::text(score.unwrap().score.to_string())
 }
 
 fn create_user(request: &Request) -> Response {
@@ -176,7 +174,12 @@ fn comment(request: &Request) -> Response {
         None => return Response::text("missing required parameter to").with_status_code(400),
     };
 
-    match Comment::new(address, to, content).persist() {
+    let field_address = match request.get_param("field_address") {
+        Some(value) => value,
+        None => return Response::text("missing required parameter field_address").with_status_code(400),
+    };
+
+    match Comment::new(address, to, content, field_address).persist() {
         Ok(_) => Response::text("comment created"),
         Err(detail) => Response::text(detail).with_status_code(400),
     }

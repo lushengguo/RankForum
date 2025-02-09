@@ -22,12 +22,12 @@ pub struct Comment {
 
     pub content: String,
     pub timestamp: i64,
+
+    pub field_address: Address,
 }
 
 impl Comment {
-    pub fn new(from: Address, to: Address, content: String) -> Comment {
-        
-
+    pub fn new(from: Address, to: Address, content: String, field_address: Address) -> Comment {
         Comment {
             from,
             to,
@@ -37,25 +37,26 @@ impl Comment {
             content,
             timestamp: Utc::now().timestamp(),
             address: generate_address(),
+            field_address,
         }
     }
 
     pub fn persist(&self) -> Result<(), String> {
-        global_db().persist_comment(self)
+        global_db().insert_comment(self)
     }
 
     fn calculate_vote_score(&self, voter: &Address) -> i64 {
         // this would not fail, if failed means db is corrupted or code bug
         let field = global_db().field(None, Some(self.to.clone())).unwrap();
 
-        let voter_score = match global_db().score(&field.address, voter) {
-            Some(score) => score,
-            None => {
+        let voter_score = match global_db().select_score(&field.address, voter) {
+            Ok(score) => score,
+            Err(_) => {
                 warn!("User {} not found in field {}", self.from, field.address);
                 return 0;
             }
         };
-        let voter_level = level(voter_score);
+        let voter_level = level(voter_score.score);
         let self_level = level(self.score);
 
         calculate_vote_score(self_level, voter_level)
@@ -69,7 +70,7 @@ impl Comment {
         }
         self.score += vote_score;
         self.upvote += 1;
-        global_db().persist_comment(self);
+        global_db().insert_comment(self);
     }
 
     pub fn downvote(&mut self, downvoter: &Address) {
@@ -80,7 +81,7 @@ impl Comment {
         }
         self.score -= vote_score;
         self.downvote += 1;
-        global_db().persist_comment(self);
+        global_db().insert_comment(self);
     }
 }
 
@@ -107,7 +108,6 @@ pub struct Post {
 
 impl Post {
     pub fn new(from: Address, field_address: Address, title: String, content: String) -> Post {
-        
         Post {
             address: generate_address(),
             from: from.clone(),
@@ -123,21 +123,21 @@ impl Post {
     }
 
     pub fn persist(&self) -> Result<(), String> {
-        global_db().persist_post(self)
+        global_db().insert_post(self)
     }
 
     fn calculate_vote_score(&self, voter: &Address) -> i64 {
         // this would not fail, if failed means db is corrupted or code bug
         let field = global_db().field(None, Some(self.address.clone())).unwrap();
 
-        let voter_score = match global_db().score(&field.address, voter) {
-            Some(score) => score,
-            None => {
+        let voter_score = match global_db().select_score(&field.address, voter) {
+            Ok(score) => score,
+            Err(_) => {
                 warn!("User {} not found in field {}", self.from, field.address);
                 return 0;
             }
         };
-        let voter_level = level(voter_score);
+        let voter_level = level(voter_score.score);
         let self_level = level(self.score);
 
         calculate_vote_score(self_level, voter_level)
@@ -151,7 +151,7 @@ impl Post {
         }
         self.score += vote_score;
         self.upvote += 1;
-        global_db().persist_post(self);
+        global_db().insert_post(self);
     }
 
     pub fn downvote(&mut self, downvoter: &Address) {
@@ -162,24 +162,24 @@ impl Post {
         }
         self.score -= vote_score;
         self.downvote += 1;
-        global_db().persist_post(self);
+        global_db().insert_post(self);
     }
 
-    pub fn comment(&mut self, comment: &String, from: &Address) {
-        let comment = Comment::new(from.clone(), self.address.clone(), comment.clone());
+    pub fn select_comment(&mut self, comment: &String, from: &Address) {
+        let comment = Comment::new(from.clone(), self.address.clone(), comment.clone(), self.to.clone());
         self.comments
             .entry(comment.address.clone())
             .or_default()
             .insert(comment.address.clone());
-        global_db().persist_post(self);
+        global_db().insert_post(self);
     }
 
     pub fn comment_on_comment(&mut self, comment: &String, from: &Address, to: &Address) {
-        let comment = Comment::new(from.clone(), to.clone(), comment.clone());
+        let comment = Comment::new(from.clone(), to.clone(), comment.clone(), self.to.clone());
         self.comments
             .entry(to.clone())
             .or_default()
             .insert(comment.address.clone());
-        global_db().persist_post(self);
+        global_db().insert_post(self);
     }
 }
