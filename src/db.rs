@@ -239,7 +239,7 @@ impl DB {
         match self.conn.lock().unwrap().query_row(
             "SELECT score FROM score WHERE field_address = ?1 AND address = ?2",
             params![field_address, target_address],
-            |row| Ok(row.get(0)?),
+            |row| row.get(0),
         ) {
             Ok(score) => Some(score),
             Err(e) => {
@@ -393,11 +393,11 @@ impl DB {
         ) {
             Ok(_) => {
                 info!("Field saved");
-                return Ok(());
+                Ok(())
             }
             Err(e) => {
                 error!("Failed to save field: {}", e);
-                return Err(e.to_string());
+                Err(e.to_string())
             }
         }
     }
@@ -489,7 +489,7 @@ impl DB {
         }
 
         let keyword_param = format!("%{}%", option.keyword.clone().unwrap());
-        if let Some(_) = &option.keyword {
+        if option.keyword.is_some() {
             sql.push_str(" AND (title LIKE ? OR content LIKE ?)");
             params.push(&keyword_param);
             params.push(&keyword_param);

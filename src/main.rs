@@ -1,9 +1,7 @@
 extern crate rankforum;
 
-use env_logger;
 use rankforum::service;
 use std::io::Write;
-use rouille;
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
@@ -21,6 +19,6 @@ fn main() {
         .init();
 
     rouille::start_server("localhost:8000", move |request| {
-        rouille::log(request, std::io::stdout(), || service::handle_route(&request))
+        rouille::log(request, std::io::stdout(), || service::handle_route(request))
     });
 }

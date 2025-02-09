@@ -20,27 +20,25 @@ pub struct SessionStorage {
 }
 
 pub fn handle_route(request: &Request) -> Response {
-    if request.url() != "login" && request.method() == "POST" {
-        if !user_already_logined(request) {
-            return rouille::Response::text("please login first").with_status_code(401);
-        }
+    if request.url() != "login" && request.method() == "POST" && !user_already_logined(request) {
+        return rouille::Response::text("please login first").with_status_code(401);
     }
 
     router!(request,
         (POST) (/login) => {
-            login(&request)
+            login(request)
         },
         (POST) (/post) => {
-            post(&request)
+            post(request)
         },
         (POST) (/comment) => {
-            comment(&request)
+            comment(request)
         },
         (GET) (/filter_post) => {
-            filter_post(&request)
+            filter_post(request)
         },
         (POST) (/rename) => {
-            user_rename(&request)
+            user_rename(request)
         },
         _ => rouille::Response::empty_404()
     )
@@ -53,10 +51,7 @@ fn get_session_cache(request: &Request) -> Option<SessionStorage> {
     };
 
     let sessions_storage = GLOBAL_SESSION_STORGE.lock().unwrap();
-    match sessions_storage.get(&sid) {
-        Some(cache) => Some(cache.clone()),
-        None => None,
-    }
+    sessions_storage.get(&sid).cloned()
 }
 
 fn address(request: &Request) -> Option<Address> {
@@ -69,7 +64,7 @@ fn address(request: &Request) -> Option<Address> {
 fn user_already_logined(request: &Request) -> bool {
     match get_session_cache(request) {
         Some(cache) => {
-            return cache.logined;
+            cache.logined
         }
         None => false,
     }
@@ -228,7 +223,7 @@ fn filter_post(request: &Request) -> Response {
 }
 
 fn login(request: &Request) -> Response {
-    let body = input::plain_text_body(&request).unwrap();
+    let body = input::plain_text_body(request).unwrap();
     let json_body: serde_json::Value = serde_json::from_str(&body).unwrap();
     let pubkey = match json_body.get("pubkey") {
         Some(pubkey) => pubkey.as_str().unwrap(),
@@ -253,9 +248,9 @@ fn login(request: &Request) -> Response {
 fn user_rename(request: &Request) -> Response {
     match (request.get_param("name"), request.get_param("address")) {
         (Some(name), Some(address)) => match User::new(address, "".to_string()).rename(name) {
-            Ok(_) => return Response::text("user renamed"),
-            Err(detail) => return Response::text(detail).with_status_code(400),
+            Ok(_) => Response::text("user renamed"),
+            Err(detail) => Response::text(detail).with_status_code(400),
         },
-        _ => return Response::text("missing required parameter name or address").with_status_code(400),
-    };
+        _ => Response::text("missing required parameter name or address").with_status_code(400),
+    }
 }

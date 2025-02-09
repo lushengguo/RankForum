@@ -20,7 +20,7 @@ pub struct FilterOption {
 impl Field {
     // load from db to memory as cache
     pub fn save_to_db(&self) {
-        global_db().persist_field(&self);
+        global_db().persist_field(self);
     }
 
     // create new field instance
