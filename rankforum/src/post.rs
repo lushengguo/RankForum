@@ -2,13 +2,14 @@ use std::collections::{HashMap, HashSet};
 
 use crate::db::*;
 use crate::field::Field;
-use crate::score::calculate_vote_impact;
+use crate::score::calculate_vote_score;
 use crate::user::level;
 use crate::{generate_address, Address};
 
 use chrono::Utc;
 use log::{error, warn};
 
+#[derive(Debug, PartialEq)]
 pub struct Comment {
     pub address: Address,
     pub from: Address,
@@ -37,11 +38,14 @@ impl Comment {
             address: generate_address(),
         };
 
-        DB::update_comment(&comment);
         return comment;
     }
 
-    fn calculate_vote_impact(&self, voter: &Address) -> i64 {
+    pub fn persist(&self) -> Result<(), String> {
+        DB::persist_comment(&self)
+    }
+
+    fn calculate_vote_score(&self, voter: &Address) -> i64 {
         // this would not fail, if failed means db is corrupted or code bug
         let field = DB::field(None, Some(self.to.clone())).unwrap();
 
@@ -55,34 +59,36 @@ impl Comment {
         let voter_level = level(voter_score);
         let self_level = level(self.score);
 
-        calculate_vote_impact(self_level, voter_level)
+        calculate_vote_score(self_level, voter_level)
     }
 
     pub fn upvote(&mut self, upvoter: &Address) {
-        let impact = self.calculate_vote_impact(upvoter);
-        if impact == 0 {
-            error!("Vote impact is 0, this should not happen");
+        let vote_score = self.calculate_vote_score(upvoter);
+        if vote_score == 0 {
+            error!("Vote vote_score is 0, this should not happen");
             return;
         }
-        self.score += impact;
+        self.score += vote_score;
         self.upvote += 1;
-        DB::update_comment(&self);
+        DB::persist_comment(&self);
     }
 
     pub fn downvote(&mut self, downvoter: &Address) {
-        let impact = self.calculate_vote_impact(downvoter);
-        if impact == 0 {
-            error!("Vote impact is 0, this should not happen");
+        let vote_score = self.calculate_vote_score(downvoter);
+        if vote_score == 0 {
+            error!("Vote vote_score is 0, this should not happen");
             return;
         }
-        self.score -= impact;
+        self.score -= vote_score;
         self.downvote += 1;
-        DB::update_comment(&self);
+        DB::persist_comment(&self);
     }
 }
 
 type DirectCommentAddress = Address;
 type InDirectCommentAddress = Address;
+
+#[derive(Debug, PartialEq)]
 pub struct Post {
     pub address: Address,
     pub from: Address,
@@ -114,12 +120,14 @@ impl Post {
             timestamp: Utc::now().timestamp(),
             comments: HashMap::new(),
         };
-
-        DB::update_post(&post);
         post
     }
 
-    fn calculate_vote_impact(&self, voter: &Address) -> i64 {
+    pub fn persist(&self) -> Result<(), String> {
+        DB::persist_post(&self)
+    }
+
+    fn calculate_vote_score(&self, voter: &Address) -> i64 {
         // this would not fail, if failed means db is corrupted or code bug
         let field = DB::field(None, Some(self.address.clone())).unwrap();
 
@@ -131,31 +139,31 @@ impl Post {
             }
         };
         let voter_level = level(voter_score);
-        let self_level = level(self.score); 
+        let self_level = level(self.score);
 
-        calculate_vote_impact(self_level, voter_level)
+        calculate_vote_score(self_level, voter_level)
     }
 
     pub fn upvote(&mut self, upvoter: &Address) {
-        let impact = self.calculate_vote_impact(upvoter);
-        if impact == 0 {
-            error!("Vote impact is 0, this should not happen");
+        let vote_score = self.calculate_vote_score(upvoter);
+        if vote_score == 0 {
+            error!("Vote vote_score is 0, this should not happen");
             return;
         }
-        self.score += impact;
+        self.score += vote_score;
         self.upvote += 1;
-        DB::update_post(&self);
+        DB::persist_post(&self);
     }
 
     pub fn downvote(&mut self, downvoter: &Address) {
-        let impact = self.calculate_vote_impact(downvoter);
-        if impact == 0 {
-            error!("Vote impact is 0, this should not happen");
+        let vote_score = self.calculate_vote_score(downvoter);
+        if vote_score == 0 {
+            error!("Vote vote_score is 0, this should not happen");
             return;
         }
-        self.score -= impact;
+        self.score -= vote_score;
         self.downvote += 1;
-        DB::update_post(&self);
+        DB::persist_post(&self);
     }
 
     pub fn comment(&mut self, comment: &String, from: &Address) {
@@ -164,7 +172,7 @@ impl Post {
             .entry(comment.address.clone())
             .or_insert(HashSet::new())
             .insert(comment.address.clone());
-        DB::update_post(&self);
+        DB::persist_post(&self);
     }
 
     pub fn comment_on_comment(&mut self, comment: &String, from: &Address, to: &Address) {
@@ -173,6 +181,6 @@ impl Post {
             .entry(to.clone())
             .or_insert(HashSet::new())
             .insert(comment.address.clone());
-        DB::update_post(&self);
+        DB::persist_post(&self);
     }
 }

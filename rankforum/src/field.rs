@@ -4,6 +4,7 @@ use crate::db::DB;
 use crate::post::Post;
 use crate::Address;
 
+#[derive(Debug, PartialEq)]
 pub struct Field {
     pub name: String,
     pub address: String,
@@ -20,7 +21,7 @@ pub struct FilterOption {
 impl Field {
     // load from db to memory as cache
     pub fn save_to_db(&self) {
-        DB::save_field(&self);
+        DB::persist_field(&self);
     }
 
     // create new field instance

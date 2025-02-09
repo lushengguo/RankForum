@@ -12,10 +12,12 @@ pub struct User {
 }
 
 impl User {
-    pub fn new(name: String) -> User {
-        User {
-            address: generate_address(),
-            name,
-        }
+    pub fn new(address: Address, name: String) -> User {
+        User { address, name }
+    }
+
+    pub fn rename(&mut self, new_name: String) -> Result<(), String> {
+        self.name = new_name;
+        DB::rename(self.address.clone(), self.name.clone())
     }
 }
