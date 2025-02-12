@@ -98,38 +98,26 @@ pub fn textual_integer_add(value1: &str, value2: &str) -> TextxualInteger {
     textual_integer_add_positive(value1, value2)
 }
 
-pub fn textual_integer_add_positive(value1: &str, value2: &str) -> TextxualInteger {
-    let mut result = String::new();
-    let mut carry = 0;
-
-    let chars1: Vec<char> = value1.chars().rev().collect();
-    let chars2: Vec<char> = value2.chars().rev().collect();
-    let max_len = chars1.len().max(chars2.len());
-
-    for i in 0..max_len {
-        let digit1 = chars1.get(i).and_then(|c| c.to_digit(10)).unwrap_or(0);
-        let digit2 = chars2.get(i).and_then(|c| c.to_digit(10)).unwrap_or(0);
-
-        let sum = digit1 + digit2 + carry;
-        carry = sum / 10;
-        result.push(std::char::from_digit(sum % 10, 10).unwrap());
+pub fn textual_integer_pow(base: &str, exponent: u32) -> TextxualInteger {
+    if exponent == 0 {
+        return "1".to_string();
+    }
+    if exponent == 1 {
+        return base.to_string();
     }
 
-    if carry > 0 {
-        result.push(std::char::from_digit(carry, 10).unwrap());
-    }
+    let mut res = "1".to_string();
+    let mut current_base = base.to_string();
+    let mut current_exponent = exponent;
 
-    result.chars().rev().collect()
-}
-
-pub fn textual_integer_is_smaller(value1: &str, value2: &str) -> bool {
-    if value1.len() < value2.len() {
-        return true;
-    } else if value1.len() > value2.len() {
-        return false;
-    } else {
-        return value1 < value2; // Lexicographical comparison when lengths are equal
+    while current_exponent > 0 {
+        if current_exponent % 2 == 1 {
+            res = textual_integer_mul_positive(&res, &current_base);
+        }
+        current_base = textual_integer_mul_positive(&current_base, &current_base);
+        current_exponent /= 2;
     }
+    res
 }
 
 pub fn textual_integer_sub(value1: &str, value2: &str) -> TextxualInteger {
@@ -160,7 +148,41 @@ pub fn textual_integer_sub(value1: &str, value2: &str) -> TextxualInteger {
     textual_integer_sub_positive(value1, value2)
 }
 
-pub fn textual_integer_sub_positive(value1: &str, value2: &str) -> TextxualInteger {
+fn textual_integer_add_positive(value1: &str, value2: &str) -> TextxualInteger {
+    let mut result = String::new();
+    let mut carry = 0;
+
+    let chars1: Vec<char> = value1.chars().rev().collect();
+    let chars2: Vec<char> = value2.chars().rev().collect();
+    let max_len = chars1.len().max(chars2.len());
+
+    for i in 0..max_len {
+        let digit1 = chars1.get(i).and_then(|c| c.to_digit(10)).unwrap_or(0);
+        let digit2 = chars2.get(i).and_then(|c| c.to_digit(10)).unwrap_or(0);
+
+        let sum = digit1 + digit2 + carry;
+        carry = sum / 10;
+        result.push(std::char::from_digit(sum % 10, 10).unwrap());
+    }
+
+    if carry > 0 {
+        result.push(std::char::from_digit(carry, 10).unwrap());
+    }
+
+    result.chars().rev().collect()
+}
+
+fn textual_integer_is_smaller(value1: &str, value2: &str) -> bool {
+    if value1.len() < value2.len() {
+        return true;
+    } else if value1.len() > value2.len() {
+        return false;
+    } else {
+        return value1 < value2; // Lexicographical comparison when lengths are equal
+    }
+}
+
+fn textual_integer_sub_positive(value1: &str, value2: &str) -> TextxualInteger {
     let mut result = String::new();
     let mut borrow = 0;
 
@@ -189,7 +211,7 @@ pub fn textual_integer_sub_positive(value1: &str, value2: &str) -> TextxualInteg
     result.chars().rev().collect()
 }
 
-pub fn textual_integer_mul_positive(value1: &str, value2: &str) -> TextxualInteger {
+fn textual_integer_mul_positive(value1: &str, value2: &str) -> TextxualInteger {
     if value1 == "0" || value2 == "0" {
         return "0".to_string();
     }
@@ -226,28 +248,6 @@ pub fn textual_integer_mul_positive(value1: &str, value2: &str) -> TextxualInteg
         result.remove(0);
     }
     result
-}
-
-pub fn textual_integer_pow(base: &str, exponent: u32) -> TextxualInteger {
-    if exponent == 0 {
-        return "1".to_string();
-    }
-    if exponent == 1 {
-        return base.to_string();
-    }
-
-    let mut res = "1".to_string();
-    let mut current_base = base.to_string();
-    let mut current_exponent = exponent;
-
-    while current_exponent > 0 {
-        if current_exponent % 2 == 1 {
-            res = textual_integer_mul_positive(&res, &current_base);
-        }
-        current_base = textual_integer_mul_positive(&current_base, &current_base);
-        current_exponent /= 2;
-    }
-    res
 }
 
 #[cfg(test)]

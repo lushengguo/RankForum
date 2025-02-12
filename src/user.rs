@@ -1,6 +1,5 @@
 use crate::db::global_db;
 use crate::Address;
-use crate::score::TextxualInteger;
 
 pub struct User {
     pub address: Address,
