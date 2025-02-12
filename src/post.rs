@@ -47,7 +47,7 @@ impl Comment {
 
     fn calculate_vote_score(&self, voter: &Address) -> TextualInteger {
         // this would not fail, if failed means db is corrupted or code bug
-        let field = global_db().field(None, Some(self.to.clone())).unwrap();
+        let field = global_db().select_field(None, Some(self.to.clone())).unwrap();
 
         let voter_score = match global_db().select_score(&field.address, voter) {
             Ok(score) => score,
@@ -128,7 +128,7 @@ impl Post {
 
     fn calculate_vote_score(&self, voter: &Address) -> TextualInteger {
         // this would not fail, if failed means db is corrupted or code bug
-        let field = global_db().field(None, Some(self.address.clone())).unwrap();
+        let field = global_db().select_field(None, Some(self.address.clone())).unwrap();
 
         let voter_score = match global_db().select_score(&field.address, voter) {
             Ok(score) => score,

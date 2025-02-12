@@ -37,7 +37,7 @@ pub fn handle_route(request: &Request) -> Response {
         (GET) (/filter_post) => {
             filter_post(request)
         },
-        (POST) (/rename) => {
+        (POST) (/rename_user) => {
             user_rename(request)
         },
         _ => rouille::Response::empty_404()
@@ -74,7 +74,7 @@ fn query_user_address(request: &Request) -> Response {
         return Response::text("missing required parameter user_name").with_status_code(400);
     }
 
-    let user = global_db().user(Some(user_name), None);
+    let user = global_db().select_user(Some(user_name), None);
     if user.is_none() {
         return Response::text("user not found").with_status_code(404);
     }
@@ -88,7 +88,7 @@ fn query_field_address(request: &Request) -> Response {
         return Response::text("missing required parameter field_name").with_status_code(400);
     }
 
-    let field = global_db().field(Some(field_name), None);
+    let field = global_db().select_field(Some(field_name), None);
     if field.is_err() {
         return Response::text("field not found").with_status_code(404);
     }
@@ -105,12 +105,12 @@ fn query_score_in_field(request: &Request) -> Response {
         return Response::text("missing required parameter user_name or field_name").with_status_code(400);
     }
 
-    let user = global_db().user(Some(user_name), Some(user_address));
+    let user = global_db().select_user(Some(user_name), Some(user_address));
     if user.is_none() {
         return Response::text("user not found").with_status_code(404);
     }
 
-    let field = global_db().field(Some(field_name), Some(field_address));
+    let field = global_db().select_field(Some(field_name), Some(field_address));
     if field.is_err() {
         return Response::text("field not found").with_status_code(404);
     }
@@ -139,7 +139,7 @@ fn create_user(request: &Request) -> Response {
 fn post(request: &Request) -> Response {
     let from = address(request).unwrap();
 
-    let field = match global_db().field(request.get_param("field_name"), request.get_param("field_address")) {
+    let field = match global_db().select_field(request.get_param("field_name"), request.get_param("field_address")) {
         Ok(value) => value,
         Err(_) => return Response::text("field not found").with_status_code(404),
     };
@@ -250,7 +250,7 @@ fn login(request: &Request) -> Response {
 
 fn user_rename(request: &Request) -> Response {
     match (request.get_param("name"), request.get_param("address")) {
-        (Some(name), Some(address)) => match User::new(address, "".to_string()).rename(name) {
+        (Some(name), Some(address)) => match User::new(address, "".to_string()).rename_user(name) {
             Ok(_) => Response::text("user renamed"),
             Err(detail) => Response::text(detail).with_status_code(400),
         },

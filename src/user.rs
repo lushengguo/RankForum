@@ -11,8 +11,8 @@ impl User {
         User { address, name }
     }
 
-    pub fn rename(&mut self, new_name: String) -> Result<(), String> {
+    pub fn rename_user(&mut self, new_name: String) -> Result<(), String> {
         self.name = new_name;
-        global_db().rename(self.address.clone(), self.name.clone())
+        global_db().rename_user(self.address.clone(), self.name.clone())
     }
 }

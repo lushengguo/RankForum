@@ -283,7 +283,7 @@ impl DB {
         self.vote(from, to, from_score, to_score, voted_score, field_address)
     }
 
-    pub fn rename(&self, address: Address, name: String) -> Result<(), String> {
+    pub fn rename_user(&self, address: Address, name: String) -> Result<(), String> {
         let name_exists: bool = self
             .conn
             .lock()
@@ -312,7 +312,7 @@ impl DB {
         }
     }
 
-    pub fn user(&self, name: Option<String>, address: Option<Address>) -> Option<User> {
+    pub fn select_user(&self, name: Option<String>, address: Option<Address>) -> Option<User> {
         match self.conn.lock().unwrap().query_row(
             "SELECT name, address FROM user WHERE name = ?1 OR address = ?2",
             params![name, address],
@@ -354,7 +354,7 @@ impl DB {
         }
     }
 
-    pub fn all_fields(&self) -> Vec<Field> {
+    pub fn select_all_fields(&self) -> Vec<Field> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT address, name FROM fields").unwrap();
         let field_iter = stmt.query_map([], |row| {
@@ -372,7 +372,7 @@ impl DB {
         fields
     }
 
-    fn field_of_comment(&self, address: &Address) -> Result<Address, String> {
+    fn select_field_of_comment(&self, address: &Address) -> Result<Address, String> {
         let conn = self.conn.lock().unwrap();
         match conn.query_row(
             "SELECT address, field_address
@@ -389,7 +389,7 @@ impl DB {
     }
 
     pub fn select_comment(&self, address: &Address) -> Result<Comment, String> {
-        let field_address = self.field_of_comment(&address)?;
+        let field_address = self.select_field_of_comment(&address)?;
         let score = self.select_score(address, &field_address)?;
 
         let db = self.conn.lock().unwrap();
@@ -419,7 +419,7 @@ impl DB {
         }
     }
 
-    fn create_user_if_not_exist(&self, address: &Address) -> Result<User, String> {
+    fn select_or_insert_user(&self, address: &Address) -> Result<User, String> {
         let conn = self.conn.lock().unwrap();
         match conn.query_row("SELECT name FROM user WHERE address = ?1", params![address], |row| {
             row.get(0)
@@ -488,7 +488,7 @@ impl DB {
     }
 
     pub fn insert_comment(&self, comment: &Comment) -> Result<(), String> {
-        self.create_user_if_not_exist(&comment.from)?;
+        self.select_or_insert_user(&comment.from)?;
         let post_result = self.select_post(&comment.to.clone());
         let comment_result = self.select_comment(&comment.to.clone());
         if post_result.is_err() && comment_result.is_err() {
@@ -581,8 +581,8 @@ impl DB {
     // this allow anonymous user's post
     // and record this user in db with a random name
     pub fn insert_post(&self, post: &Post) -> Result<(), String> {
-        self.field(None, Some(post.to.clone()))?;
-        self.create_user_if_not_exist(&post.from)?;
+        self.select_field(None, Some(post.to.clone()))?;
+        self.select_or_insert_user(&post.from)?;
 
         let mut db = self.conn.lock().unwrap();
 
@@ -628,7 +628,7 @@ impl DB {
         }
     }
 
-    pub fn field(&self, name: Option<String>, address: Option<Address>) -> Result<Field, String> {
+    pub fn select_field(&self, name: Option<String>, address: Option<Address>) -> Result<Field, String> {
         if name.is_some() {
             match self.conn.lock().unwrap().query_row(
                 "SELECT address, name FROM fields WHERE name = ?1",
@@ -693,7 +693,7 @@ impl DB {
     }
 
     pub fn filter_posts(&self, field: &String, option: &FilterOption) -> Vec<Post> {
-        let address = match self.field(Some(field.clone()), None) {
+        let address = match self.select_field(Some(field.clone()), None) {
             Ok(field) => field.address,
             Err(e) => {
                 warn!("Field not found, error: {}", e);
@@ -793,7 +793,7 @@ mod tests {
         let insert_result = db.insert_field(&field);
         assert!(insert_result.is_ok());
 
-        let field = db.field(Some(field.name.clone()), None).unwrap();
+        let field = db.select_field(Some(field.name.clone()), None).unwrap();
         assert_eq!(field.address, field.address);
     }
 
@@ -802,17 +802,17 @@ mod tests {
         let db = new_db();
 
         let user = User::new(generate_address(), generate_name());
-        let register_result = db.rename(user.address.clone(), user.name.clone());
+        let register_result = db.rename_user(user.address.clone(), user.name.clone());
         assert!(register_result.is_ok());
 
-        let user = db.user(Some(user.name.clone()), None).unwrap();
+        let user = db.select_user(Some(user.name.clone()), None).unwrap();
         assert_eq!(user.address, user.address);
 
         let new_name = generate_name();
-        let rename_result = db.rename(user.address.clone(), new_name.clone());
+        let rename_result = db.rename_user(user.address.clone(), new_name.clone());
         assert!(rename_result.is_ok());
 
-        let user = db.user(None, Some(user.address.clone())).unwrap();
+        let user = db.select_user(None, Some(user.address.clone())).unwrap();
         assert_eq!(user.name, new_name);
     }
 
@@ -823,7 +823,7 @@ mod tests {
         };
         match db.insert_field(&field) {
             Ok(_) => {
-                let field2 = db.field(Some(field.name.clone()), None).unwrap();
+                let field2 = db.select_field(Some(field.name.clone()), None).unwrap();
                 assert!(field == field2);
                 Ok(field)
             }
