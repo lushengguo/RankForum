@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::db::global_db;
-use crate::score::calculate_vote_score;
-use crate::user::level;
+use crate::score::*;
 use crate::{generate_address, Address};
 
 use chrono::Utc;
@@ -16,7 +15,7 @@ pub struct Comment {
 
     // score reflects value of this comment, the highest score comment will be shown first
     // and it's able to be negative
-    pub score: i64,
+    pub score: TextxualInteger,
     pub upvote: u64,
     pub downvote: u64,
 
@@ -31,7 +30,7 @@ impl Comment {
         Comment {
             from,
             to,
-            score: 0,
+            score: "0".to_string(),
             upvote: 0,
             downvote: 0,
             content,
@@ -45,7 +44,7 @@ impl Comment {
         global_db().insert_comment(self)
     }
 
-    fn calculate_vote_score(&self, voter: &Address) -> i64 {
+    fn calculate_vote_score(&self, voter: &Address) -> TextxualInteger {
         // this would not fail, if failed means db is corrupted or code bug
         let field = global_db().field(None, Some(self.to.clone())).unwrap();
 
@@ -53,33 +52,33 @@ impl Comment {
             Ok(score) => score,
             Err(_) => {
                 warn!("User {} not found in field {}", self.from, field.address);
-                return 0;
+                return "0".to_string();
             }
         };
-        let voter_level = level(voter_score.score);
-        let self_level = level(self.score);
+        let voter_level = level(&voter_score.score);
+        let self_level = level(&self.score);
 
         calculate_vote_score(self_level, voter_level)
     }
 
     pub fn upvote(&mut self, upvoter: &Address) {
         let vote_score = self.calculate_vote_score(upvoter);
-        if vote_score == 0 {
+        if vote_score == "0".to_string() {
             error!("Vote vote_score is 0, this should not happen");
             return;
         }
-        self.score += vote_score;
+        self.score = textual_integer_add(&self.score, &vote_score);
         self.upvote += 1;
         global_db().insert_comment(self);
     }
 
     pub fn downvote(&mut self, downvoter: &Address) {
         let vote_score = self.calculate_vote_score(downvoter);
-        if vote_score == 0 {
+        if vote_score == "0".to_string() {
             error!("Vote vote_score is 0, this should not happen");
             return;
         }
-        self.score -= vote_score;
+        self.score = textual_integer_sub(&self.score, &vote_score);
         self.downvote += 1;
         global_db().insert_comment(self);
     }
@@ -96,7 +95,7 @@ pub struct Post {
 
     pub title: String,
     pub content: String,
-    pub score: i64,
+    pub score: TextxualInteger,
     pub upvote: u64,
     pub downvote: u64,
     pub timestamp: i64,
@@ -114,7 +113,7 @@ impl Post {
             to: field_address,
             title,
             content,
-            score: 0,
+            score: "0".to_string(),
             upvote: 0,
             downvote: 0,
             timestamp: Utc::now().timestamp(),
@@ -126,7 +125,7 @@ impl Post {
         global_db().insert_post(self)
     }
 
-    fn calculate_vote_score(&self, voter: &Address) -> i64 {
+    fn calculate_vote_score(&self, voter: &Address) -> TextxualInteger {
         // this would not fail, if failed means db is corrupted or code bug
         let field = global_db().field(None, Some(self.address.clone())).unwrap();
 
@@ -134,33 +133,33 @@ impl Post {
             Ok(score) => score,
             Err(_) => {
                 warn!("User {} not found in field {}", self.from, field.address);
-                return 0;
+                return "0".to_string();
             }
         };
-        let voter_level = level(voter_score.score);
-        let self_level = level(self.score);
+        let voter_level = level(&voter_score.score);
+        let self_level = level(&self.score);
 
         calculate_vote_score(self_level, voter_level)
     }
 
     pub fn upvote(&mut self, upvoter: &Address) {
         let vote_score = self.calculate_vote_score(upvoter);
-        if vote_score == 0 {
+        if vote_score == "0".to_string() {
             error!("Vote vote_score is 0, this should not happen");
             return;
         }
-        self.score += vote_score;
+        self.score = textual_integer_add(&self.score, &vote_score);
         self.upvote += 1;
         global_db().insert_post(self);
     }
 
     pub fn downvote(&mut self, downvoter: &Address) {
         let vote_score = self.calculate_vote_score(downvoter);
-        if vote_score == 0 {
+        if vote_score == "0".to_string() {
             error!("Vote vote_score is 0, this should not happen");
             return;
         }
-        self.score -= vote_score;
+        self.score = textual_integer_sub(&self.score, &vote_score);
         self.downvote += 1;
         global_db().insert_post(self);
     }

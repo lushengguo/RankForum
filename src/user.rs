@@ -1,9 +1,6 @@
 use crate::db::global_db;
 use crate::Address;
-
-pub fn level(score: i64) -> u8 {
-    (score as f64).log(100.0).floor() as u8
-}
+use crate::score::TextxualInteger;
 
 pub struct User {
     pub address: Address,

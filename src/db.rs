@@ -1,7 +1,7 @@
 use crate::field::*;
 use crate::generate_name;
 use crate::post::*;
-use crate::score::{minimal_score_of_level, Score};
+use crate::score::*;
 use crate::user::*;
 use crate::Address;
 
@@ -71,7 +71,7 @@ impl DB {
     /// |---------------|---------|-----------------|
     /// | address       | TEXT    | PRIMARY KEY     |
     /// | field_address | TEXT    | NOT NULL        |
-    /// | score         | INTEGER | NOT NULL        |
+    /// | score         | TEXT | NOT NULL        |
     /// | upvote        | INTEGER | NOT NULL        |
     /// | downvote      | INTEGER | NOT NULL        |
     ///
@@ -100,9 +100,9 @@ impl DB {
     /// |---------------------|---------|-----------------|
     /// | to_address          | TEXT    | PRIMARY KEY     |
     /// | from_address        | TEXT    | NOT NULL        |
-    /// | from_score_snapshot | INTEGER | NOT NULL        |
-    /// | to_score_snapshot   | INTEGER | NOT NULL        |
-    /// | voted_score         | INTEGER | NOT NULL        |
+    /// | from_score_snapshot | TEXT    | NOT NULL        |
+    /// | to_score_snapshot   | TEXT    | NOT NULL        |
+    /// | voted_score         | TEXT    | NOT NULL        |
     ///
     pub fn init(&self) -> Result<()> {
         // Check and create 'user' table
@@ -151,7 +151,7 @@ impl DB {
                 "CREATE TABLE IF NOT EXISTS score (
             address TEXT PRIMARY KEY,
             field_address TEXT NOT NULL,
-            score INTEGER NOT NULL,
+            score TEXT NOT NULL,
             upvote INTEGER NOT NULL,
             downvote INTEGER NOT NULL
         )",
@@ -213,9 +213,9 @@ impl DB {
                 "CREATE TABLE IF NOT EXISTS votes (
                         to_address TEXT PRIMARY KEY,
                         from_address TEXT NOT NULL,
-                        from_score_snapshot INTEGER NOT NULL,
-                        to_score_snapshot INTEGER NOT NULL,
-                        voted_score INTEGER NOT NULL
+                        from_score_snapshot TEXT NOT NULL,
+                        to_score_snapshot TEXT NOT NULL,
+                        voted_score TEXT NOT NULL
                     )",
                 params![],
             )?;
@@ -228,9 +228,9 @@ impl DB {
         &self,
         from: &Address,
         to: &Address,
-        from_score: i64,
-        to_score: i64,
-        voted_score: i64,
+        from_score: TextxualInteger,
+        to_score: TextxualInteger,
+        voted_score: TextxualInteger,
         field_address: &String,
     ) -> Result<(), String> {
         let mut score = self.select_score(to, field_address)?;
@@ -244,8 +244,8 @@ impl DB {
             params![to, from, from_score, to_score, voted_score],
         ).map_err(|err|err.to_string())?;
 
-        score.score += voted_score;
-        if voted_score > 0 {
+        score.score = textual_integer_add(&score.score, &voted_score);
+        if textual_integer_is_positive(&voted_score) {
             score.upvote += 1;
         } else {
             score.downvote += 1;
@@ -261,9 +261,9 @@ impl DB {
         &self,
         from: &Address,
         to: &Address,
-        from_score: i64,
-        to_score: i64,
-        voted_score: i64,
+        from_score: TextxualInteger,
+        to_score: TextxualInteger,
+        voted_score: TextxualInteger,
         field_address: &String,
     ) -> Result<(), String> {
         self.vote(from, to, from_score, to_score, voted_score, field_address)
@@ -274,9 +274,9 @@ impl DB {
         &self,
         from: &Address,
         to: &Address,
-        from_score: i64,
-        to_score: i64,
-        voted_score: i64,
+        from_score: TextxualInteger,
+        to_score: TextxualInteger,
+        voted_score: TextxualInteger,
         field_address: &String,
     ) -> Result<(), String> {
         self.vote(from, to, from_score, to_score, voted_score, field_address)
@@ -516,7 +516,7 @@ impl DB {
         let score = Score {
             address: comment.address.clone(),
             field_address: comment.field_address.clone(),
-            score: 0,
+            score: "0".to_string(),
             upvote: 0,
             downvote: 0,
         };
@@ -558,7 +558,7 @@ impl DB {
                     to: row.get(2)?,
                     title: row.get(3)?,
                     content: row.get(4)?,
-                    score: 0,
+                    score: "0".to_string(),
                     timestamp: row.get(5)?,
                     upvote: 0,
                     downvote: 0,
@@ -591,7 +591,7 @@ impl DB {
         let score = Score {
             address: post.address.clone(),
             field_address: post.to.clone(),
-            score: 0,
+            score: "0".to_string(),
             upvote: 0,
             downvote: 0,
         };
@@ -706,7 +706,7 @@ impl DB {
         let mut params: Vec<&dyn rusqlite::ToSql> = vec![&address];
         params.push(&address);
 
-        let mut score = 0;
+        let mut score = "0".to_string();
         if let Some(level) = option.level {
             sql.push_str(" AND score > ?");
             score = minimal_score_of_level(level);
@@ -851,7 +851,7 @@ mod tests {
             from: generate_address(),
             to: to.clone(),
             content: generate_name(),
-            score: 0,
+            score: "0".to_string(),
             timestamp: 0,
             upvote: 0,
             downvote: 0,
@@ -915,19 +915,19 @@ mod tests {
         insert_comment(&db, &comment1.address, &post.to).unwrap();
     }
 
-    fn assert_user_score_eqs(db: &DB, field: &Field, user_address: &Address, score: i64) {
+    fn assert_user_score_eqs(db: &DB, field: &Field, user_address: &Address, score: TextxualInteger) {
         match db.select_score(user_address, &field.address) {
             Ok(user_score) => assert_eq!(user_score.score, score),
-            Err(_) => assert_eq!(0, score),
+            Err(_) => assert_eq!("0", score),
         }
     }
 
-    fn assert_post_score_eqs(db: &DB, field: &Field, post_address: &Address, score: i64) {
+    fn assert_post_score_eqs(db: &DB, field: &Field, post_address: &Address, score: TextxualInteger) {
         let post_score = db.select_score(&post_address, &field.address).unwrap().score;
         assert_eq!(post_score, score);
     }
 
-    fn assert_comment_sore_equals(db: &DB, field: &Field, comment_address: &Address, score: i64) {
+    fn assert_comment_sore_equals(db: &DB, field: &Field, comment_address: &Address, score: TextxualInteger) {
         let comment_score = db.select_score(&comment_address, &field.address).unwrap().score;
         assert_eq!(comment_score, score);
     }
@@ -940,9 +940,9 @@ mod tests {
         let comment = insert_comment(&db, &post.address, &post.to).unwrap();
         let user = User::new(generate_address(), generate_name());
 
-        assert_user_score_eqs(&db, &field, &user.address, 0);
-        assert_post_score_eqs(&db, &field, &post.address, 0);
-        assert_comment_sore_equals(&db, &field, &comment.address, 0);
+        assert_user_score_eqs(&db, &field, &user.address, "0".to_string());
+        assert_post_score_eqs(&db, &field, &post.address, "0".to_string());
+        assert_comment_sore_equals(&db, &field, &comment.address, "0".to_string());
 
         return (db, field, post, comment, user);
     }
@@ -950,49 +950,105 @@ mod tests {
     #[test]
     fn test_upvote_on_post() {
         let (db, field, post, _, user) = init_field_user_post_comment();
-        db.upvote(&user.address, &post.address, 0, 0, 1, &field.address).unwrap();
+        db.upvote(
+            &user.address,
+            &post.address,
+            "0".to_string(),
+            "0".to_string(),
+            "1".to_string(),
+            &field.address,
+        )
+        .unwrap();
         let score = db.select_score(&post.address, &field.address).unwrap();
-        assert_eq!(score.score, 1);
+        assert_eq!(score.score, "1");
     }
 
     #[test]
     fn test_downvote_on_post() {
         let (db, field, post, _, user) = init_field_user_post_comment();
-        db.downvote(&user.address, &post.address, 0, 0, -1, &field.address).unwrap();
+        db.downvote(
+            &user.address,
+            &post.address,
+            "0".to_string(),
+            "0".to_string(),
+            "-1".to_string(),
+            &field.address,
+        )
+        .unwrap();
         let score = db.select_score(&post.address, &field.address).unwrap();
-        assert_eq!(score.score, -1);
+        assert_eq!(score.score, "-1");
     }
 
     #[test]
     fn test_upvote_on_comment() {
         let (db, field, _, comment, user) = init_field_user_post_comment();
-        db.upvote(&user.address, &comment.address, 0, 0, 1, &field.address).unwrap();
+        db.upvote(
+            &user.address,
+            &comment.address,
+            "0".to_string(),
+            "0".to_string(),
+            "1".to_string(),
+            &field.address,
+        )
+        .unwrap();
         let score = db.select_score(&comment.address, &field.address).unwrap();
-        assert_eq!(score.score, 1);
+        assert_eq!(score.score, "1");
     }
 
     #[test]
     fn test_downvote_on_comment() {
         let (db, field, _, comment, user) = init_field_user_post_comment();
-        db.downvote(&user.address, &comment.address, 0, 0, -1, &field.address).unwrap();
+        db.downvote(
+            &user.address,
+            &comment.address,
+            "0".to_string(),
+            "0".to_string(),
+            "-1".to_string(),
+            &field.address,
+        )
+        .unwrap();
         let score = db.select_score(&comment.address, &field.address).unwrap();
-        assert_eq!(score.score, -1);
+        assert_eq!(score.score, "-1");
     }
 
     #[test]
     fn test_score_down_cross_zero() {
         let (db, field, _, comment, user) = init_field_user_post_comment();
 
-        db.upvote(&user.address, &comment.address, 0, 0, 1, &field.address).unwrap();
+        db.upvote(
+            &user.address,
+            &comment.address,
+            "0".to_string(),
+            "0".to_string(),
+            "1".to_string(),
+            &field.address,
+        )
+        .unwrap();
         let score = db.select_score(&comment.address, &field.address).unwrap();
-        assert_eq!(score.score, 1);
+        assert_eq!(score.score, "1");
 
-        db.downvote(&user.address, &comment.address, 0, 0, -1, &field.address).unwrap();
+        db.downvote(
+            &user.address,
+            &comment.address,
+            "0".to_string(),
+            "0".to_string(),
+            "-1".to_string(),
+            &field.address,
+        )
+        .unwrap();
         let score = db.select_score(&comment.address, &field.address).unwrap();
-        assert_eq!(score.score, 0);
+        assert_eq!(score.score, "0");
 
-        db.downvote(&user.address, &comment.address, 0, 0, -1, &field.address).unwrap();
+        db.downvote(
+            &user.address,
+            &comment.address,
+            "0".to_string(),
+            "0".to_string(),
+            "-1".to_string(),
+            &field.address,
+        )
+        .unwrap();
         let score = db.select_score(&comment.address, &field.address).unwrap();
-        assert_eq!(score.score, -1);
+        assert_eq!(score.score, "-1");
     }
 }
