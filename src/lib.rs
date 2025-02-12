@@ -5,6 +5,7 @@ pub mod post;
 pub mod score;
 pub mod service;
 pub mod user;
+pub mod textual_integer;
 use uuid::Uuid;
 
 pub type Address = String;
