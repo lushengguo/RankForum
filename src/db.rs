@@ -17,12 +17,11 @@ pub struct DB {
     conn: Mutex<rusqlite::Connection>,
 
     db_path: String,
-    rm_db_on_drop: bool,
 }
 
 lazy_static! {
     pub static ref GLOBAL_DB: Arc<DB> = {
-        let db = DB::new("database.sqlite", false).expect("Failed to initialize database");
+        let db = DB::new("database.sqlite").expect("Failed to initialize database");
         db.init().expect("Failed to initialize database schema");
         Arc::new(db)
     };
@@ -32,23 +31,12 @@ pub fn global_db() -> Arc<DB> {
     GLOBAL_DB.clone()
 }
 
-impl Drop for DB {
-    fn drop(&mut self) {
-        if self.rm_db_on_drop {
-            if let Err(e) = std::fs::remove_file(&self.db_path) {
-                error!("Failed to remove database file: {}", e);
-            }
-        }
-    }
-}
-
 impl DB {
-    fn new(path: &str, rm_db_on_drop: bool) -> Result<Self> {
+    fn new(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
         Ok(DB {
             conn: Mutex::new(conn),
             db_path: path.to_string(),
-            rm_db_on_drop,
         })
     }
 
@@ -798,19 +786,9 @@ mod tests {
     use crate::generate_address;
     use crate::generate_name;
 
-    fn new_db() -> DB {
-        let random_name = generate_name();
-        let db_path = format!("target/{}.sqlite", random_name);
-
-        let db = DB::new(&db_path, true).expect("Failed to initialize database");
-        db.init().expect("Failed to initialize database schema");
-
-        db
-    }
-
     #[test]
     fn test_create_field() {
-        let db = new_db();
+        let db = global_db();
 
         let field = Field {
             address: generate_address(),
@@ -825,7 +803,7 @@ mod tests {
 
     #[test]
     fn test_register_and_rename_user() {
-        let db = new_db();
+        let db = global_db();
 
         let user = User::new(generate_address(), generate_name());
         let register_result = db.rename_user(user.address.clone(), user.name.clone());
@@ -898,7 +876,7 @@ mod tests {
 
     #[test]
     fn test_post_on_not_exist_field() {
-        let db = new_db();
+        let db = global_db();
 
         let field = Field {
             address: generate_address(),
@@ -910,7 +888,7 @@ mod tests {
 
     #[test]
     fn test_post_on_exist_field() {
-        let db = new_db();
+        let db = global_db();
 
         let field = create_field(&db, &generate_address(), &generate_name()).unwrap();
         assert!(insert_post(&db, &field.address).is_ok());
@@ -918,7 +896,7 @@ mod tests {
 
     #[test]
     fn test_comment_on_invalid_address() {
-        let db = new_db();
+        let db = global_db();
 
         let result: std::result::Result<Comment, String> =
             insert_comment(&db, &generate_address(), &generate_address());
@@ -927,7 +905,7 @@ mod tests {
 
     #[test]
     fn test_comment_on_post() {
-        let db = new_db();
+        let db = global_db();
 
         let field = create_field(&db, &generate_address(), &generate_name()).unwrap();
         let post = insert_post(&db, &field.address).unwrap();
@@ -936,7 +914,7 @@ mod tests {
 
     #[test]
     fn test_comment_on_comment() {
-        let db = new_db();
+        let db = global_db();
 
         let field = create_field(&db, &generate_address(), &generate_name()).unwrap();
         let post = insert_post(&db, &field.address).unwrap();
@@ -961,8 +939,8 @@ mod tests {
         assert_eq!(comment_score, score);
     }
 
-    fn init_field_user_post_comment() -> (DB, Field, Post, Comment, User) {
-        let db = new_db();
+    fn init_field_user_post_comment() -> (Arc<DB>, Field, Post, Comment, User) {
+        let db = global_db();
 
         let field = create_field(&db, &generate_address(), &generate_name()).unwrap();
         let post = insert_post(&db, &field.address).unwrap();
