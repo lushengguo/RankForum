@@ -6,6 +6,7 @@ use crate::textual_integer::TextualInteger;
 use crate::user::*;
 use crate::Address;
 
+use chrono::Utc;
 use lazy_static::lazy_static;
 use log::{error, info, warn};
 use rusqlite::{params, params_from_iter, Connection, Result};
@@ -99,10 +100,8 @@ impl DB {
     /// ## `votes`
     /// | Column              | Type    | Constraints     |
     /// |---------------------|---------|-----------------|
-    /// | to_address          | TEXT    | PRIMARY KEY     |
+    /// | to_address          | TEXT    | NOT NULL        |
     /// | from_address        | TEXT    | NOT NULL        |
-    /// | from_score_snapshot | TEXT    | NOT NULL        |
-    /// | to_score_snapshot   | TEXT    | NOT NULL        |
     /// | voted_score         | TEXT    | NOT NULL        |
     ///
     pub fn init(&self) -> Result<()> {
@@ -212,10 +211,8 @@ impl DB {
         if !votes_table_exists {
             self.conn.lock().unwrap().execute(
                 "CREATE TABLE IF NOT EXISTS votes (
-                        to_address TEXT PRIMARY KEY,
                         from_address TEXT NOT NULL,
-                        from_score_snapshot TEXT NOT NULL,
-                        to_score_snapshot TEXT NOT NULL,
+                        to_address TEXT NOT NULL,
                         voted_score TEXT NOT NULL
                     )",
                 params![],
@@ -229,8 +226,6 @@ impl DB {
         &self,
         from: &Address,
         to: &Address,
-        from_score: TextualInteger,
-        to_score: TextualInteger,
         voted_score: TextualInteger,
         field_address: &String,
     ) -> Result<(), String> {
@@ -239,19 +234,54 @@ impl DB {
         let mut db = self.conn.lock().unwrap();
         let tx = db.transaction().map_err(|e| e.to_string())?;
 
-        tx.execute(
-            "INSERT OR REPLACE INTO votes (to_address, from_address, from_score_snapshot, to_score_snapshot, voted_score) 
-            VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![to, from, from_score.to_string(), to_score.to_string(), voted_score.to_string()],
-        ).map_err(|err|err.to_string())?;
+        match tx.query_row(
+            "SELECT voted_score FROM votes WHERE from_address = ?1 AND to_address = ?2",
+            params![from, to],
+            |row| {
+                let history_voted_score: TextualInteger = TextualInteger::new(&row.get::<_, String>(0)?);
+                Ok(history_voted_score)
+            },
+        ) {
+            Ok(history_voted_score) => {
+                if history_voted_score.is_positive() == voted_score.is_positive() {
+                    return Err("Already voted".to_string());
+                } else {
+                    tx.execute(
+                        "UPDATE votes SET voted_score = ?1 WHERE from_address = ?2 AND to_address = ?3",
+                        params![voted_score.to_string(), from, to],
+                    )
+                    .map_err(|err| err.to_string())?;
 
-        if voted_score.is_positive() {
-            score.upvote += 1;
-        } else {
-            score.downvote += 1;
-        }
-        score.score += voted_score;
-        self.update_score(&score, &tx)?;
+                    if voted_score.is_positive() {
+                        score.upvote += 1;
+                        score.downvote -= 1
+                    } else {
+                        score.upvote -= 1;
+                        score.downvote += 1;
+                    }
+
+                    score.score += voted_score;
+                    score.score -= history_voted_score;
+                    self.update_score(&score, &tx)?;
+                }
+            }
+            Err(_) => {
+                tx.execute(
+                    "INSERT OR REPLACE INTO votes (from_address, to_address, voted_score) 
+            VALUES (?1, ?2, ?3)",
+                    params![from, to, voted_score.to_string()],
+                )
+                .map_err(|err| err.to_string())?;
+
+                if voted_score.is_positive() {
+                    score.upvote += 1;
+                } else {
+                    score.downvote += 1;
+                }
+                score.score += voted_score;
+                self.update_score(&score, &tx)?;
+            }
+        };
 
         tx.commit().map_err(|err| err.to_string())?;
 
@@ -262,12 +292,10 @@ impl DB {
         &self,
         from: &Address,
         to: &Address,
-        from_score: TextualInteger,
-        to_score: TextualInteger,
         voted_score: TextualInteger,
         field_address: &String,
     ) -> Result<(), String> {
-        self.vote(from, to, from_score, to_score, voted_score, field_address)
+        self.vote(from, to, voted_score, field_address)
     }
 
     // voted score could be negative
@@ -275,12 +303,10 @@ impl DB {
         &self,
         from: &Address,
         to: &Address,
-        from_score: TextualInteger,
-        to_score: TextualInteger,
         voted_score: TextualInteger,
         field_address: &String,
     ) -> Result<(), String> {
-        self.vote(from, to, from_score, to_score, voted_score, field_address)
+        self.vote(from, to, voted_score, field_address)
     }
 
     pub fn rename_user(&self, address: Address, name: String) -> Result<(), String> {
@@ -953,15 +979,8 @@ mod tests {
     #[test]
     fn test_upvote_on_post() {
         let (db, field, post, _, user) = init_field_user_post_comment();
-        db.upvote(
-            &user.address,
-            &post.address,
-            TextualInteger::new("0"),
-            TextualInteger::new("0"),
-            TextualInteger::new("1"),
-            &field.address,
-        )
-        .unwrap();
+        db.upvote(&user.address, &post.address, TextualInteger::new("1"), &field.address)
+            .unwrap();
         let score = db.select_score(&post.address, &field.address).unwrap();
         assert_eq!(score.score, TextualInteger::new("1"));
     }
@@ -969,15 +988,8 @@ mod tests {
     #[test]
     fn test_downvote_on_post() {
         let (db, field, post, _, user) = init_field_user_post_comment();
-        db.downvote(
-            &user.address,
-            &post.address,
-            TextualInteger::new("0"),
-            TextualInteger::new("0"),
-            TextualInteger::new("-1"),
-            &field.address,
-        )
-        .unwrap();
+        db.downvote(&user.address, &post.address, TextualInteger::new("-1"), &field.address)
+            .unwrap();
         let score = db.select_score(&post.address, &field.address).unwrap();
         assert_eq!(score.score, TextualInteger::new("-1"));
     }
@@ -988,8 +1000,6 @@ mod tests {
         db.upvote(
             &user.address,
             &comment.address,
-            TextualInteger::new("0"),
-            TextualInteger::new("0"),
             TextualInteger::new("1"),
             &field.address,
         )
@@ -1004,8 +1014,6 @@ mod tests {
         db.downvote(
             &user.address,
             &comment.address,
-            TextualInteger::new("0"),
-            TextualInteger::new("0"),
             TextualInteger::new("-1"),
             &field.address,
         )
@@ -1021,8 +1029,6 @@ mod tests {
         db.upvote(
             &user.address,
             &comment.address,
-            TextualInteger::new("0"),
-            TextualInteger::new("0"),
             TextualInteger::new("1"),
             &field.address,
         )
@@ -1033,24 +1039,74 @@ mod tests {
         db.downvote(
             &user.address,
             &comment.address,
-            TextualInteger::new("0"),
-            TextualInteger::new("0"),
             TextualInteger::new("-1"),
             &field.address,
         )
         .unwrap();
         let score = db.select_score(&comment.address, &field.address).unwrap();
-        assert_eq!(score.score, TextualInteger::new("0"));
+        assert_eq!(score.score, TextualInteger::new("-1"));
 
-        db.downvote(
+        let result = db.downvote(
             &user.address,
             &comment.address,
-            TextualInteger::new("0"),
-            TextualInteger::new("0"),
+            TextualInteger::new("-1"),
+            &field.address,
+        );
+        assert!(result.is_err());
+
+        let score = db.select_score(&comment.address, &field.address).unwrap();
+        assert_eq!(score.score, TextualInteger::new("-1"));
+    }
+
+    #[test]
+    fn test_double_vote() {
+        let (db, field, post, comment, user) = init_field_user_post_comment();
+        // post
+        db.upvote(&user.address, &post.address, TextualInteger::new("1"), &field.address)
+            .unwrap();
+        let score = db.select_score(&post.address, &field.address).unwrap();
+        assert_eq!(score.score, TextualInteger::new("1"));
+
+        let result = db.upvote(&user.address, &post.address, TextualInteger::new("1"), &field.address);
+        assert!(result.is_err());
+        let score = db.select_score(&post.address, &field.address).unwrap();
+        assert_eq!(score.score, TextualInteger::new("1"));
+
+        db.upvote(&user.address, &post.address, TextualInteger::new("-1"), &field.address)
+            .unwrap();
+
+        let score = db.select_score(&post.address, &field.address).unwrap();
+        assert_eq!(score.score, TextualInteger::new("-1"));
+
+        // comment
+        db.upvote(
+            &user.address,
+            &comment.address,
+            TextualInteger::new("1"),
+            &field.address,
+        )
+        .unwrap();
+        let score = db.select_score(&comment.address, &field.address).unwrap();
+        assert_eq!(score.score, TextualInteger::new("1"));
+
+        let result = db.upvote(
+            &user.address,
+            &comment.address,
+            TextualInteger::new("1"),
+            &field.address,
+        );
+        assert!(result.is_err());
+        let score = db.select_score(&comment.address, &field.address).unwrap();
+        assert_eq!(score.score, TextualInteger::new("1"));
+
+        db.upvote(
+            &user.address,
+            &comment.address,
             TextualInteger::new("-1"),
             &field.address,
         )
         .unwrap();
+
         let score = db.select_score(&comment.address, &field.address).unwrap();
         assert_eq!(score.score, TextualInteger::new("-1"));
     }

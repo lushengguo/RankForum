@@ -104,7 +104,7 @@ impl TextualInteger {
 
         TextualInteger::new(&result_str.chars().rev().collect::<String>())
     }
-    
+
     fn sub_positive(&self, other: &Self) -> Self {
         let mut result_str = String::new();
         let mut borrow = 0;
@@ -140,12 +140,11 @@ impl TextualInteger {
         } else if self.value.len() > other.value.len() {
             return false;
         } else {
-            return self.value < other.value; // Lexicographical comparison when lengths are equal
+            return self.value < other.value;
         }
     }
 }
 
-// 实现 Add trait
 impl Add for TextualInteger {
     type Output = Self;
 
@@ -189,7 +188,6 @@ impl AddAssign for TextualInteger {
     }
 }
 
-// 实现 Sub trait
 impl Sub for TextualInteger {
     type Output = Self;
 
@@ -246,7 +244,6 @@ impl SubAssign for TextualInteger {
     }
 }
 
-// 实现 Mul trait
 impl Mul for TextualInteger {
     type Output = Self;
 
