@@ -35,9 +35,6 @@ impl Field {
     }
 
     pub fn filter_posts(&self, mut option: FilterOption) -> Result<Vec<Post>, String> {
-        if option.max_results > 100 {
-            option.max_results = 100;
-        }
         global_db().filter_posts(&self.name, &option)
     }
 }
@@ -55,17 +52,4 @@ mod tests {
         let field = Field::new(field.name.clone(), field.address.clone());
         assert!(field.persist().is_err());
     }
-
-    // #[test]
-    // fn test_field_filter_posts() {
-    //     let field = Field::new("test".to_string(), "test".to_string());
-    //     let option = FilterOption {
-    //         level: None,
-    //         keyword: None,
-    //         ascending_by_timestamp: false,
-    //         ordering: false,
-    //         max_results: 10,
-    //     };
-    //     assert_eq!(field.filter_posts(option).len(), 0);
-    // }
 }
