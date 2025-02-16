@@ -26,6 +26,8 @@ pub struct Comment {
     pub timestamp: i64,
 
     pub field_address: Address,
+
+    pub comments: Vec<Comment>,
 }
 
 fn inner_calculate_vote_score(
@@ -53,6 +55,7 @@ impl Comment {
             timestamp: Utc::now().timestamp(),
             address: generate_unique_address(),
             field_address,
+            comments: vec![],
         }
     }
 
@@ -90,10 +93,12 @@ impl Comment {
         self.downvote += 1;
         global_db().upsert_comment(self)
     }
-}
 
-type DirectCommentAddress = Address;
-type InDirectCommentAddress = Address;
+    pub fn lazy_load_comments(&mut self, option: &FilterOption) -> Result<Vec<Comment>, String> {
+        self.comments = global_db().filter_comments(&self.address, &option)?;
+        Ok(self.comments.clone())
+    }
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Post {
@@ -110,7 +115,7 @@ pub struct Post {
 
     // comments are lazy to load in memory
     // only queried comments will be loaded
-    pub comments: HashMap<DirectCommentAddress, HashSet<InDirectCommentAddress>>,
+    pub comments: Vec<Comment>,
 }
 
 impl Post {
@@ -125,7 +130,7 @@ impl Post {
             upvote: 0,
             downvote: 0,
             timestamp: Utc::now().timestamp(),
-            comments: HashMap::new(),
+            comments: Vec::new(),
         }
     }
 
@@ -164,8 +169,9 @@ impl Post {
         global_db().upsert_post(self)
     }
 
-    pub fn lazy_load_comment(&mut self, option: &FilterOption) -> Result<Vec<Comment>, String> {
-        global_db().filter_comments(&self.to, &option)
+    pub fn lazy_load_comments(&mut self, option: &FilterOption) -> Result<Vec<Comment>, String> {
+        self.comments = global_db().filter_comments(&self.address, &option)?;
+        Ok(self.comments.clone())
     }
 }
 
@@ -362,5 +368,52 @@ mod tests {
         let user = new_persisted_user();
         assert_eq!(post.downvote(&user.address), Ok(()));
         assert_eq!(post.score, TextualInteger::new("-2"));
+    }
+
+    use crate::field::{FilterOption, Ordering};
+
+    fn make_comment(
+        from: &Address,
+        to: &Address,
+        field: &Field,
+        content: &str,
+        timestamp: i64,
+    ) -> Result<Comment, String> {
+        let mut comment = Comment::new(from.clone(), to.clone(), content.to_string(), field.address.clone());
+        comment.timestamp = timestamp;
+        comment.persist()?;
+        Ok(comment)
+    }
+
+    #[test]
+    fn test_lazy_load_comments() {
+        let field = new_persisted_field();
+        let mut post = new_persisted_post(&field.address);
+
+        let option = FilterOption {
+            level: None,
+            keyword: None,
+            ordering: Ordering::ByTimestamp,
+            ascending: true,
+            max_results: 10,
+        };
+        assert_eq!(post.lazy_load_comments(&option), Ok(vec![]));
+
+        let comment1 = make_comment(&generate_unique_address(), &post.address, &field, "test1", 1).unwrap();
+        let comment2 = make_comment(&generate_unique_address(), &post.address, &field, "test2", 2).unwrap();
+        let comment3 = make_comment(&generate_unique_address(), &comment2.address, &field, "test3", 3).unwrap();
+        let comment4 = make_comment(&generate_unique_address(), &comment3.address, &field, "test4", 4).unwrap();
+
+        let mut comments = post.lazy_load_comments(&option).unwrap();
+        assert_eq!(comments.len(), 2);
+        assert_eq!(comments, vec![comment1, comment2]);
+
+        let mut comments2 = comments[1].lazy_load_comments(&option).unwrap();
+        assert_eq!(comments2.len(), 1);
+        assert_eq!(comments2, vec![comment3]);
+
+        let comments3 = comments2[0].lazy_load_comments(&option).unwrap();
+        assert_eq!(comments3.len(), 1);
+        assert_eq!(comments3, vec![comment4]);
     }
 }

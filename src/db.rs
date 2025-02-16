@@ -423,6 +423,7 @@ impl DB {
                     upvote: score.upvote,
                     downvote: score.downvote,
                     field_address: row.get(5)?,
+                    comments: Vec::new(),
                 })
             },
         ) {
@@ -578,7 +579,7 @@ impl DB {
                     timestamp: row.get(5)?,
                     upvote: 0,
                     downvote: 0,
-                    comments: HashMap::new(),
+                    comments: Vec::new(),
                 })
             },
         ) {
@@ -783,6 +784,7 @@ impl DB {
                         score: TextualInteger::new("0"),
                         upvote: 0,
                         downvote: 0,
+                        comments: Vec::new(),
                     })
                 })
                 .unwrap();
@@ -884,7 +886,7 @@ impl DB {
                         score: TextualInteger::new("0"),
                         upvote: 0,
                         downvote: 0,
-                        comments: HashMap::new(),
+                        comments: Vec::new(),
                     })
                 })
                 .unwrap();
@@ -992,6 +994,7 @@ mod tests {
             upvote: 0,
             downvote: 0,
             field_address: field_address.clone(),
+            comments: Vec::new(),
         };
         match db.upsert_comment(&comment) {
             Ok(_) => {
@@ -1234,6 +1237,7 @@ mod tests {
             upvote: upvote,
             downvote: downvote,
             field_address: post.to.clone(),
+            comments: Vec::new(),
         };
         db.upsert_comment(&comment).unwrap();
         comment
@@ -1440,7 +1444,7 @@ mod tests {
             timestamp: timestamp,
             upvote: upvote,
             downvote: downvote,
-            comments: HashMap::new(),
+            comments: Vec::new(),
         };
         db.upsert_post(&post).unwrap();
         post
