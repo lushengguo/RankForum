@@ -10,10 +10,10 @@ use uuid::Uuid;
 
 pub type Address = String;
 
-pub fn generate_address() -> Address {
+pub fn generate_unique_address() -> Address {
     Uuid::new_v4().to_string()
 }
 
-pub fn generate_name() -> String {
+pub fn generate_unique_name() -> String {
     Uuid::new_v4().to_string()
 }

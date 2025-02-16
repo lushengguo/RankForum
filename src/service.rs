@@ -116,11 +116,8 @@ fn query_score_in_field(request: &Request) -> Response {
     }
 
     let score = global_db().select_score(&field.unwrap().address, &user.unwrap().address);
-    if score.is_ok() {
-        return Response::text("score not found").with_status_code(404);
-    }
 
-    Response::text(score.unwrap().score.to_string())
+    Response::text(score.score.to_string())
 }
 
 fn create_user(request: &Request) -> Response {
@@ -250,7 +247,7 @@ fn login(request: &Request) -> Response {
 
 fn user_rename(request: &Request) -> Response {
     match (request.get_param("name"), request.get_param("address")) {
-        (Some(name), Some(address)) => match User::new(address, "".to_string()).rename_user(name) {
+        (Some(name), Some(address)) => match User::new(address, "".to_string()).persist() {
             Ok(_) => Response::text("user renamed"),
             Err(detail) => Response::text(detail).with_status_code(400),
         },

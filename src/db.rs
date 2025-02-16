@@ -1,5 +1,5 @@
 use crate::field::*;
-use crate::generate_name;
+use crate::generate_unique_name;
 use crate::post::*;
 use crate::score::*;
 use crate::textual_integer::TextualInteger;
@@ -215,9 +215,9 @@ impl DB {
         from: &Address,
         to: &Address,
         voted_score: TextualInteger,
-        field_address: &String,
+        field_address: &str,
     ) -> Result<(), String> {
-        let mut score = self.select_score(to, field_address)?;
+        let mut score = self.select_score(to, field_address);
 
         let mut db = self.conn.lock().unwrap();
         let tx = db.transaction().map_err(|e| e.to_string())?;
@@ -281,7 +281,7 @@ impl DB {
         from: &Address,
         to: &Address,
         voted_score: TextualInteger,
-        field_address: &String,
+        field_address: &str,
     ) -> Result<(), String> {
         self.vote(from, to, voted_score, field_address)
     }
@@ -292,12 +292,12 @@ impl DB {
         from: &Address,
         to: &Address,
         voted_score: TextualInteger,
-        field_address: &String,
+        field_address: &str,
     ) -> Result<(), String> {
         self.vote(from, to, voted_score, field_address)
     }
 
-    pub fn rename_user(&self, address: Address, name: String) -> Result<(), String> {
+    pub fn upsert_user(&self, address: Address, name: String) -> Result<(), String> {
         let name_exists: bool = self
             .conn
             .lock()
@@ -345,7 +345,7 @@ impl DB {
         }
     }
 
-    pub fn select_score(&self, address: &String, field_address: &String) -> Result<Score, String> {
+    pub fn select_score(&self, address: &str, field_address: &str) -> Score {
         let conn = self.conn.lock().unwrap();
         match conn.query_row(
             "SELECT address, field_address, score, upvote, downvote FROM score WHERE address = ?1 AND field_address = ?2",
@@ -360,10 +360,9 @@ impl DB {
                 })
             },
         ) {
-            Ok(score) => Ok(score),
+            Ok(score) => score,
             Err(e) => {
-                error!("Failed to get score: {}", e);
-                Err(e.to_string())
+                Score { address:address.to_string(), field_address: field_address.to_string(), score: TextualInteger::new("0"), upvote: 0, downvote: 0 }
             }
         }
     }
@@ -404,7 +403,7 @@ impl DB {
 
     pub fn select_comment(&self, address: &Address) -> Result<Comment, String> {
         let field_address = self.select_field_of_comment(&address)?;
-        let score = self.select_score(address, &field_address)?;
+        let score = self.select_score(address, &field_address);
 
         let db = self.conn.lock().unwrap();
         match db.query_row(
@@ -445,38 +444,38 @@ impl DB {
             Err(_) => {
                 conn.execute(
                     "INSERT INTO user (address, name) VALUES (?1, ?2)",
-                    params![address, generate_name()],
+                    params![address, generate_unique_name()],
                 )
                 .map_err(|err| err.to_string())?;
 
                 Ok(User {
                     address: address.clone(),
-                    name: generate_name(),
+                    name: generate_unique_name(),
                 })
             }
         }
     }
 
-    fn insert_score(&self, score: &Score, tx: &rusqlite::Transaction) -> Result<(), String> {
+    fn upsert_score(&self, score: &Score, tx: &rusqlite::Transaction) -> Result<(), String> {
         match tx.execute(
-            "INSERT INTO score (address, field_address, score, upvote, downvote) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                score.address,
-                score.field_address,
-                score.score.to_string(),
-                score.upvote,
-                score.downvote
-            ],
-        ) {
-            Ok(_) => {
-                info!("Score saved");
-                Ok(())
-            }
-            Err(e) => {
-                error!("Failed to save score: {}", e);
-                Err(e.to_string())
-            }
+        "INSERT OR REPLACE INTO score (address, field_address, score, upvote, downvote) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            score.address,
+            score.field_address,
+            score.score.to_string(),
+            score.upvote,
+            score.downvote
+        ],
+    ) {
+        Ok(_) => {
+            info!("Score saved or updated");
+            Ok(())
         }
+        Err(e) => {
+            error!("Failed to save or update score: {}", e);
+            Err(e.to_string())
+        }
+    }
     }
 
     fn update_score(&self, score: &Score, tx: &rusqlite::Transaction) -> Result<(), String> {
@@ -501,7 +500,7 @@ impl DB {
         }
     }
 
-    pub fn insert_comment(&self, comment: &Comment) -> Result<(), String> {
+    pub fn upsert_comment(&self, comment: &Comment) -> Result<(), String> {
         self.select_or_insert_user(&comment.from)?;
         let post_result = self.select_post(&comment.to.clone());
         let comment_result = self.select_comment(&comment.to.clone());
@@ -531,11 +530,11 @@ impl DB {
         let score = Score {
             address: comment.address.clone(),
             field_address: comment.field_address.clone(),
-            score: TextualInteger::new("0"),
-            upvote: 0,
-            downvote: 0,
+            score: comment.score.clone(),
+            upvote: comment.upvote,
+            downvote: comment.downvote,
         };
-        self.insert_score(&score, &tx)?;
+        self.upsert_score(&score, &tx)?;
 
         match tx.execute(
             "INSERT OR REPLACE INTO comment (address, from_address, to_address, field_address, content, timestamp) 
@@ -562,7 +561,7 @@ impl DB {
         }
     }
 
-    pub fn select_post(&self, address: &String) -> Result<Post, String> {
+    pub fn select_post(&self, address: &str) -> Result<Post, String> {
         let mut post = match self.conn.lock().unwrap().query_row(
             "SELECT address, from_address, to_address, title, content, timestamp FROM post WHERE address = ?1",
             params![address],
@@ -585,7 +584,7 @@ impl DB {
             Err(e) => return Err(e.to_string()),
         };
 
-        let score = self.select_score(&post.address, &post.to)?;
+        let score = self.select_score(&post.address, &post.to);
         post.score = score.score;
         post.upvote = score.upvote;
         post.downvote = score.downvote;
@@ -594,7 +593,7 @@ impl DB {
 
     // this allow anonymous user's post
     // and record this user in db with a random name
-    pub fn insert_post(&self, post: &Post) -> Result<(), String> {
+    pub fn upsert_post(&self, post: &Post) -> Result<(), String> {
         self.select_field(None, Some(post.to.clone()))?;
         self.select_or_insert_user(&post.from)?;
 
@@ -606,11 +605,11 @@ impl DB {
         let score = Score {
             address: post.address.clone(),
             field_address: post.to.clone(),
-            score: TextualInteger::new("0"),
-            upvote: 0,
-            downvote: 0,
+            score: post.score.clone(),
+            upvote: post.upvote,
+            downvote: post.downvote,
         };
-        self.insert_score(&score, &tx)?;
+        self.upsert_score(&score, &tx)?;
 
         match tx.execute(
             "INSERT OR REPLACE INTO post (address, from_address, to_address, title, content, timestamp) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -628,7 +627,7 @@ impl DB {
 
     pub fn insert_field(&self, field: &Field) -> Result<(), String> {
         match self.conn.lock().unwrap().execute(
-            "INSERT OR REPLACE INTO fields (address, name) VALUES (?1, ?2)",
+            "INSERT INTO fields (address, name) VALUES (?1, ?2)",
             params![field.address, field.name],
         ) {
             Ok(_) => {
@@ -706,8 +705,8 @@ impl DB {
         }
     }
 
-    pub fn filter_posts(&self, field: &String, option: &FilterOption) -> Vec<Post> {
-        let address = match self.select_field(Some(field.clone()), None) {
+    pub fn filter_posts(&self, field: &str, option: &FilterOption) -> Vec<Post> {
+        let address = match self.select_field(Some(field.to_string()), None) {
             Ok(field) => field.address,
             Err(e) => {
                 warn!("Field not found, error: {}", e);
@@ -783,16 +782,16 @@ impl DB {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generate_address;
-    use crate::generate_name;
+    use crate::generate_unique_address;
+    use crate::generate_unique_name;
 
     #[test]
     fn test_create_field() {
         let db = global_db();
 
         let field = Field {
-            address: generate_address(),
-            name: generate_name(),
+            address: generate_unique_address(),
+            name: generate_unique_name(),
         };
         let insert_result = db.insert_field(&field);
         assert!(insert_result.is_ok());
@@ -805,25 +804,25 @@ mod tests {
     fn test_register_and_rename_user() {
         let db = global_db();
 
-        let user = User::new(generate_address(), generate_name());
-        let register_result = db.rename_user(user.address.clone(), user.name.clone());
+        let user = User::new(generate_unique_address(), generate_unique_name());
+        let register_result = db.upsert_user(user.address.clone(), user.name.clone());
         assert!(register_result.is_ok());
 
         let user = db.select_user(Some(user.name.clone()), None).unwrap();
         assert_eq!(user.address, user.address);
 
-        let new_name = generate_name();
-        let rename_result = db.rename_user(user.address.clone(), new_name.clone());
+        let new_name = generate_unique_name();
+        let rename_result = db.upsert_user(user.address.clone(), new_name.clone());
         assert!(rename_result.is_ok());
 
         let user = db.select_user(None, Some(user.address.clone())).unwrap();
         assert_eq!(user.name, new_name);
     }
 
-    fn create_field(db: &DB, address: &Address, name: &String) -> Result<Field, String> {
+    fn create_field(db: &DB, address: &Address, name: &str) -> Result<Field, String> {
         let field = Field {
             address: address.clone(),
-            name: name.clone(),
+            name: name.to_string(),
         };
         match db.insert_field(&field) {
             Ok(_) => {
@@ -835,14 +834,14 @@ mod tests {
         }
     }
 
-    fn insert_post(db: &DB, field_address: &Address) -> Result<Post, String> {
+    fn upsert_post(db: &DB, field_address: &Address) -> Result<Post, String> {
         let post = Post::new(
-            generate_address(),
+            generate_unique_address(),
             field_address.clone(),
-            generate_name(),
-            generate_name(),
+            generate_unique_name(),
+            generate_unique_name(),
         );
-        match db.insert_post(&post) {
+        match db.upsert_post(&post) {
             Ok(_) => {
                 let post2 = db.select_post(&post.address).unwrap();
                 assert!(post == post2);
@@ -852,19 +851,19 @@ mod tests {
         }
     }
 
-    fn insert_comment(db: &DB, to: &Address, field_address: &Address) -> Result<Comment, String> {
+    fn upsert_comment(db: &DB, to: &Address, field_address: &Address) -> Result<Comment, String> {
         let comment = Comment {
-            address: generate_address(),
-            from: generate_address(),
+            address: generate_unique_address(),
+            from: generate_unique_address(),
             to: to.clone(),
-            content: generate_name(),
+            content: generate_unique_name(),
             score: TextualInteger::new("0"),
             timestamp: 0,
             upvote: 0,
             downvote: 0,
             field_address: field_address.clone(),
         };
-        match db.insert_comment(&comment) {
+        match db.upsert_comment(&comment) {
             Ok(_) => {
                 let comment2 = db.select_comment(&comment.address.clone()).unwrap();
                 assert!(comment == comment2);
@@ -879,19 +878,19 @@ mod tests {
         let db = global_db();
 
         let field = Field {
-            address: generate_address(),
-            name: generate_name(),
+            address: generate_unique_address(),
+            name: generate_unique_name(),
         };
 
-        assert!(insert_post(&db, &field.address).is_err());
+        assert!(upsert_post(&db, &field.address).is_err());
     }
 
     #[test]
     fn test_post_on_exist_field() {
         let db = global_db();
 
-        let field = create_field(&db, &generate_address(), &generate_name()).unwrap();
-        assert!(insert_post(&db, &field.address).is_ok());
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        assert!(upsert_post(&db, &field.address).is_ok());
     }
 
     #[test]
@@ -899,7 +898,7 @@ mod tests {
         let db = global_db();
 
         let result: std::result::Result<Comment, String> =
-            insert_comment(&db, &generate_address(), &generate_address());
+            upsert_comment(&db, &generate_unique_address(), &generate_unique_address());
         assert!(result.is_err());
     }
 
@@ -907,45 +906,42 @@ mod tests {
     fn test_comment_on_post() {
         let db = global_db();
 
-        let field = create_field(&db, &generate_address(), &generate_name()).unwrap();
-        let post = insert_post(&db, &field.address).unwrap();
-        insert_comment(&db, &post.address, &post.to).unwrap();
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        let post = upsert_post(&db, &field.address).unwrap();
+        upsert_comment(&db, &post.address, &post.to).unwrap();
     }
 
     #[test]
     fn test_comment_on_comment() {
         let db = global_db();
 
-        let field = create_field(&db, &generate_address(), &generate_name()).unwrap();
-        let post = insert_post(&db, &field.address).unwrap();
-        let comment1 = insert_comment(&db, &post.address, &post.to).unwrap();
-        insert_comment(&db, &comment1.address, &post.to).unwrap();
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        let post = upsert_post(&db, &field.address).unwrap();
+        let comment1 = upsert_comment(&db, &post.address, &post.to).unwrap();
+        upsert_comment(&db, &comment1.address, &post.to).unwrap();
     }
 
     fn assert_user_score_eqs(db: &DB, field: &Field, user_address: &Address, score: TextualInteger) {
-        match db.select_score(user_address, &field.address) {
-            Ok(user_score) => assert_eq!(user_score.score, score),
-            Err(_) => assert_eq!(TextualInteger::new("0"), score),
-        }
+        assert_eq!(db.select_score(user_address, &field.address).score, score);
     }
 
     fn assert_post_score_eqs(db: &DB, field: &Field, post_address: &Address, score: TextualInteger) {
-        let post_score = db.select_score(&post_address, &field.address).unwrap().score;
+        let post_score = db.select_score(&post_address, &field.address).score;
         assert_eq!(post_score, score);
     }
 
     fn assert_comment_sore_equals(db: &DB, field: &Field, comment_address: &Address, score: TextualInteger) {
-        let comment_score = db.select_score(&comment_address, &field.address).unwrap().score;
+        let comment_score = db.select_score(&comment_address, &field.address).score;
         assert_eq!(comment_score, score);
     }
 
     fn init_field_user_post_comment() -> (Arc<DB>, Field, Post, Comment, User) {
         let db = global_db();
 
-        let field = create_field(&db, &generate_address(), &generate_name()).unwrap();
-        let post = insert_post(&db, &field.address).unwrap();
-        let comment = insert_comment(&db, &post.address, &post.to).unwrap();
-        let user = User::new(generate_address(), generate_name());
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        let post = upsert_post(&db, &field.address).unwrap();
+        let comment = upsert_comment(&db, &post.address, &post.to).unwrap();
+        let user = User::new(generate_unique_address(), generate_unique_name());
 
         assert_user_score_eqs(&db, &field, &user.address, TextualInteger::new("0"));
         assert_post_score_eqs(&db, &field, &post.address, TextualInteger::new("0"));
@@ -959,7 +955,7 @@ mod tests {
         let (db, field, post, _, user) = init_field_user_post_comment();
         db.upvote(&user.address, &post.address, TextualInteger::new("1"), &field.address)
             .unwrap();
-        let score = db.select_score(&post.address, &field.address).unwrap();
+        let score = db.select_score(&post.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("1"));
     }
 
@@ -968,7 +964,7 @@ mod tests {
         let (db, field, post, _, user) = init_field_user_post_comment();
         db.downvote(&user.address, &post.address, TextualInteger::new("-1"), &field.address)
             .unwrap();
-        let score = db.select_score(&post.address, &field.address).unwrap();
+        let score = db.select_score(&post.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("-1"));
     }
 
@@ -982,7 +978,7 @@ mod tests {
             &field.address,
         )
         .unwrap();
-        let score = db.select_score(&comment.address, &field.address).unwrap();
+        let score = db.select_score(&comment.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("1"));
     }
 
@@ -996,7 +992,7 @@ mod tests {
             &field.address,
         )
         .unwrap();
-        let score = db.select_score(&comment.address, &field.address).unwrap();
+        let score = db.select_score(&comment.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("-1"));
     }
 
@@ -1011,7 +1007,7 @@ mod tests {
             &field.address,
         )
         .unwrap();
-        let score = db.select_score(&comment.address, &field.address).unwrap();
+        let score = db.select_score(&comment.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("1"));
 
         db.downvote(
@@ -1021,7 +1017,7 @@ mod tests {
             &field.address,
         )
         .unwrap();
-        let score = db.select_score(&comment.address, &field.address).unwrap();
+        let score = db.select_score(&comment.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("-1"));
 
         let result = db.downvote(
@@ -1032,7 +1028,7 @@ mod tests {
         );
         assert!(result.is_err());
 
-        let score = db.select_score(&comment.address, &field.address).unwrap();
+        let score = db.select_score(&comment.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("-1"));
     }
 
@@ -1042,18 +1038,18 @@ mod tests {
         // post
         db.upvote(&user.address, &post.address, TextualInteger::new("1"), &field.address)
             .unwrap();
-        let score = db.select_score(&post.address, &field.address).unwrap();
+        let score = db.select_score(&post.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("1"));
 
         let result = db.upvote(&user.address, &post.address, TextualInteger::new("1"), &field.address);
         assert!(result.is_err());
-        let score = db.select_score(&post.address, &field.address).unwrap();
+        let score = db.select_score(&post.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("1"));
 
         db.upvote(&user.address, &post.address, TextualInteger::new("-1"), &field.address)
             .unwrap();
 
-        let score = db.select_score(&post.address, &field.address).unwrap();
+        let score = db.select_score(&post.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("-1"));
 
         // comment
@@ -1064,7 +1060,7 @@ mod tests {
             &field.address,
         )
         .unwrap();
-        let score = db.select_score(&comment.address, &field.address).unwrap();
+        let score = db.select_score(&comment.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("1"));
 
         let result = db.upvote(
@@ -1074,7 +1070,7 @@ mod tests {
             &field.address,
         );
         assert!(result.is_err());
-        let score = db.select_score(&comment.address, &field.address).unwrap();
+        let score = db.select_score(&comment.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("1"));
 
         db.upvote(
@@ -1085,7 +1081,7 @@ mod tests {
         )
         .unwrap();
 
-        let score = db.select_score(&comment.address, &field.address).unwrap();
+        let score = db.select_score(&comment.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("-1"));
     }
 }
