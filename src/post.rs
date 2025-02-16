@@ -1,14 +1,12 @@
-use std::collections::{HashMap, HashSet};
 
 use crate::db::global_db;
 use crate::field::FilterOption;
-use crate::score::{self, calculate_vote_score};
+use crate::score::{self};
 use crate::textual_integer::TextualInteger;
 use crate::{generate_unique_address, Address};
 
 use chrono::Utc;
-use log::{error, warn};
-use rusqlite::fallible_iterator::Filter;
+use log::error;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Comment {

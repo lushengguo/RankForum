@@ -7,12 +7,9 @@ use crate::textual_integer::TextualInteger;
 use crate::user::*;
 use crate::Address;
 
-use chrono::Utc;
 use lazy_static::lazy_static;
 use log::{error, info, warn};
 use rusqlite::{params, params_from_iter, Connection, Result};
-use std::collections::HashMap;
-use std::fmt::format;
 use std::sync::{Arc, Mutex};
 
 pub struct DB {

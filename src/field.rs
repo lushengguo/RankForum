@@ -34,7 +34,7 @@ impl Field {
         Field { name, address }
     }
 
-    pub fn filter_posts(&self, mut option: FilterOption) -> Result<Vec<Post>, String> {
+    pub fn filter_posts(&self, option: FilterOption) -> Result<Vec<Post>, String> {
         global_db().filter_posts(&self.name, &option)
     }
 }
