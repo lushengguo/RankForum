@@ -1,14 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::db::global_db;
+use crate::field::FilterOption;
 use crate::score::{self, calculate_vote_score};
 use crate::textual_integer::TextualInteger;
 use crate::{generate_unique_address, Address};
 
 use chrono::Utc;
 use log::{error, warn};
+use rusqlite::fallible_iterator::Filter;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Comment {
     pub address: Address,
     pub from: Address,
@@ -93,7 +95,7 @@ impl Comment {
 type DirectCommentAddress = Address;
 type InDirectCommentAddress = Address;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Post {
     pub address: Address,
     pub from: Address,
@@ -162,13 +164,8 @@ impl Post {
         global_db().upsert_post(self)
     }
 
-    pub fn lazy_load_comment(&mut self, comment: &str, from: &Address) -> Result<(), String> {
-        let comment = Comment::new(from.clone(), self.address.clone(), comment.to_string(), self.to.clone());
-        self.comments
-            .entry(comment.address.clone())
-            .or_default()
-            .insert(comment.address.clone());
-        global_db().upsert_post(self)
+    pub fn lazy_load_comment(&mut self, option: &FilterOption) -> Result<Vec<Comment>, String> {
+        global_db().filter_comments(&self.to, &option)
     }
 }
 

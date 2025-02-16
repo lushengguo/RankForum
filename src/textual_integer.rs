@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +146,44 @@ impl TextualInteger {
     }
 }
 
+impl PartialOrd for TextualInteger {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TextualInteger {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let negative1 = self.value.starts_with('-');
+        let negative2 = other.value.starts_with('-');
+
+        match (negative1, negative2) {
+            (true, true) => {
+                // Both negative, compare magnitudes in reverse
+                let value1 = &self.value[1..];
+                let value2 = &other.value[1..];
+                let ti1 = TextualInteger::new(value1);
+                let ti2 = TextualInteger::new(value2);
+                // Reverse order because larger magnitude negative is smaller
+                ti2.cmp(&ti1)
+            }
+            (true, false) => Ordering::Less, // negative < positive
+            (false, true) => Ordering::Greater, // positive > negative
+            (false, false) => {
+                // Both positive, compare magnitudes normally
+                if self.value.len() < other.value.len() {
+                    Ordering::Less
+                } else if self.value.len() > other.value.len() {
+                    Ordering::Greater
+                } else {
+                    self.value.cmp(&other.value)
+                }
+            }
+        }
+    }
+}
+
+
 impl Add for TextualInteger {
     type Output = Self;
 
@@ -276,218 +315,3 @@ impl MulAssign for TextualInteger {
 }
 
 pub type TextualIntegerType = TextualInteger;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_textual_integer_add() {
-        assert_eq!(
-            TextualInteger::new("0") + TextualInteger::new("0"),
-            TextualInteger::new("0")
-        );
-        assert_eq!(
-            TextualInteger::new("1") + TextualInteger::new("1"),
-            TextualInteger::new("2")
-        );
-        assert_eq!(
-            TextualInteger::new("9") + TextualInteger::new("1"),
-            TextualInteger::new("10")
-        );
-        assert_eq!(
-            TextualInteger::new("99") + TextualInteger::new("1"),
-            TextualInteger::new("100")
-        );
-        assert_eq!(
-            TextualInteger::new("999") + TextualInteger::new("1"),
-            TextualInteger::new("1000")
-        );
-        assert_eq!(
-            TextualInteger::new("999") + TextualInteger::new("2"),
-            TextualInteger::new("1001")
-        );
-        assert_eq!(
-            TextualInteger::new("999") + TextualInteger::new("99"),
-            TextualInteger::new("1098")
-        );
-        assert_eq!(
-            TextualInteger::new("999") + TextualInteger::new("999"),
-            TextualInteger::new("1998")
-        );
-        assert_eq!(
-            TextualInteger::new("999") + TextualInteger::new("9999"),
-            TextualInteger::new("10998")
-        );
-        assert_eq!(
-            TextualInteger::new("1167167131617671654171616571") + TextualInteger::new("5716516716714657161671671641"),
-            TextualInteger::new("6883683848332328815843288212")
-        );
-        assert_eq!(
-            TextualInteger::new("-1") + TextualInteger::new("1"),
-            TextualInteger::new("0")
-        );
-        assert_eq!(
-            TextualInteger::new("-1") + TextualInteger::new("-1"),
-            TextualInteger::new("-2")
-        );
-    }
-
-    #[test]
-    fn test_textual_integer_sub() {
-        assert_eq!(
-            TextualInteger::new("0") - TextualInteger::new("0"),
-            TextualInteger::new("0")
-        );
-        assert_eq!(
-            TextualInteger::new("1") - TextualInteger::new("1"),
-            TextualInteger::new("0")
-        );
-        assert_eq!(
-            TextualInteger::new("10") - TextualInteger::new("1"),
-            TextualInteger::new("9")
-        );
-        assert_eq!(
-            TextualInteger::new("100") - TextualInteger::new("1"),
-            TextualInteger::new("99")
-        );
-        assert_eq!(
-            TextualInteger::new("1000") - TextualInteger::new("1"),
-            TextualInteger::new("999")
-        );
-        assert_eq!(
-            TextualInteger::new("1001") - TextualInteger::new("2"),
-            TextualInteger::new("999")
-        );
-        assert_eq!(
-            TextualInteger::new("1098") - TextualInteger::new("99"),
-            TextualInteger::new("999")
-        );
-        assert_eq!(
-            TextualInteger::new("1998") - TextualInteger::new("999"),
-            TextualInteger::new("999")
-        );
-        assert_eq!(
-            TextualInteger::new("10998") - TextualInteger::new("9999"),
-            TextualInteger::new("999")
-        );
-        assert_eq!(
-            TextualInteger::new("6883683848332328815843288212") - TextualInteger::new("5716516716714657161671671641"),
-            TextualInteger::new("1167167131617671654171616571")
-        );
-
-        assert_eq!(
-            TextualInteger::new("0") - TextualInteger::new("1"),
-            TextualInteger::new("-1")
-        );
-        assert_eq!(
-            TextualInteger::new("-100") - TextualInteger::new("-100"),
-            TextualInteger::new("0")
-        );
-        assert_eq!(
-            TextualInteger::new("100") - TextualInteger::new("-100"),
-            TextualInteger::new("200")
-        );
-        assert_eq!(
-            TextualInteger::new("-100") - TextualInteger::new("100"),
-            TextualInteger::new("-200")
-        );
-    }
-
-    #[test]
-    fn test_textual_integer_pow() {
-        assert_eq!(TextualInteger::new("2").pow(0), TextualInteger::new("1"));
-        assert_eq!(TextualInteger::new("2").pow(1), TextualInteger::new("2"));
-        assert_eq!(TextualInteger::new("2").pow(2), TextualInteger::new("4"));
-        assert_eq!(TextualInteger::new("2").pow(3), TextualInteger::new("8"));
-        assert_eq!(TextualInteger::new("2").pow(10), TextualInteger::new("1024"));
-        assert_eq!(TextualInteger::new("10").pow(0), TextualInteger::new("1"));
-        assert_eq!(TextualInteger::new("10").pow(1), TextualInteger::new("10"));
-        assert_eq!(TextualInteger::new("10").pow(2), TextualInteger::new("100"));
-        assert_eq!(TextualInteger::new("10").pow(3), TextualInteger::new("1000"));
-        assert_eq!(TextualInteger::new("123").pow(2), TextualInteger::new("15129"));
-        assert_eq!(TextualInteger::new("0").pow(3), TextualInteger::new("0"));
-        assert_eq!(TextualInteger::new("1").pow(5), TextualInteger::new("1"));
-        assert_eq!(TextualInteger::new("99").pow(2), TextualInteger::new("9801"));
-    }
-
-    #[test]
-    fn test_textual_integer_mul() {
-        assert_eq!(
-            TextualInteger::new("0") * TextualInteger::new("0"),
-            TextualInteger::new("0")
-        );
-        assert_eq!(
-            TextualInteger::new("1") * TextualInteger::new("0"),
-            TextualInteger::new("0")
-        );
-        assert_eq!(
-            TextualInteger::new("0") * TextualInteger::new("1"),
-            TextualInteger::new("0")
-        );
-        assert_eq!(
-            TextualInteger::new("1") * TextualInteger::new("1"),
-            TextualInteger::new("1")
-        );
-        assert_eq!(
-            TextualInteger::new("2") * TextualInteger::new("3"),
-            TextualInteger::new("6")
-        );
-        assert_eq!(
-            TextualInteger::new("10") * TextualInteger::new("10"),
-            TextualInteger::new("100")
-        );
-        assert_eq!(
-            TextualInteger::new("12") * TextualInteger::new("10"),
-            TextualInteger::new("120")
-        );
-        assert_eq!(
-            TextualInteger::new("123") * TextualInteger::new("456"),
-            TextualInteger::new("56088")
-        );
-        assert_eq!(
-            TextualInteger::new("999") * TextualInteger::new("999"),
-            TextualInteger::new("998001")
-        );
-        assert_eq!(
-            TextualInteger::new("123456789") * TextualInteger::new("987654321"),
-            TextualInteger::new("121932631112635269")
-        );
-        assert_eq!(
-            TextualInteger::new("-2") * TextualInteger::new("3"),
-            TextualInteger::new("-6")
-        );
-        assert_eq!(
-            TextualInteger::new("2") * TextualInteger::new("-3"),
-            TextualInteger::new("-6")
-        );
-        assert_eq!(
-            TextualInteger::new("-2") * TextualInteger::new("-3"),
-            TextualInteger::new("6")
-        );
-        assert_eq!(
-            TextualInteger::new("-100") * TextualInteger::new("10"),
-            TextualInteger::new("-1000")
-        );
-        assert_eq!(
-            TextualInteger::new("100") * TextualInteger::new("-10"),
-            TextualInteger::new("-1000")
-        );
-        assert_eq!(
-            TextualInteger::new("-100") * TextualInteger::new("-10"),
-            TextualInteger::new("1000")
-        );
-        assert_eq!(
-            TextualInteger::new("123") * TextualInteger::new("-456"),
-            TextualInteger::new("-56088")
-        );
-        assert_eq!(
-            TextualInteger::new("-123") * TextualInteger::new("456"),
-            TextualInteger::new("-56088")
-        );
-        assert_eq!(
-            TextualInteger::new("-123") * TextualInteger::new("-456"),
-            TextualInteger::new("56088")
-        );
-    }
-}

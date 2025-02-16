@@ -8,11 +8,20 @@ pub struct Field {
     pub address: String,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum Ordering {
+    ByTimestamp,
+    ByScore,
+    ByUpVote,
+    ByDownVote,
+    ByUpvoteSubDownVote,
+}
+
 pub struct FilterOption {
     pub level: Option<u8>,
     pub keyword: Option<String>,
-    pub ascending_by_timestamp: bool,
-    pub ascending_by_absolute_score: bool,
+    pub ordering: Ordering,
+    pub ascending: bool,
     pub max_results: u32,
 }
 
@@ -25,7 +34,7 @@ impl Field {
         Field { name, address }
     }
 
-    pub fn filter_posts(&self, mut option: FilterOption) -> Vec<Post> {
+    pub fn filter_posts(&self, mut option: FilterOption) -> Result<Vec<Post>, String> {
         if option.max_results > 100 {
             option.max_results = 100;
         }
@@ -54,7 +63,7 @@ mod tests {
     //         level: None,
     //         keyword: None,
     //         ascending_by_timestamp: false,
-    //         ascending_by_absolute_score: false,
+    //         ordering: false,
     //         max_results: 10,
     //     };
     //     assert_eq!(field.filter_posts(option).len(), 0);

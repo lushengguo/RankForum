@@ -1,3 +1,4 @@
+use crate::field::Ordering;
 use crate::field::*;
 use crate::generate_unique_name;
 use crate::post::*;
@@ -11,6 +12,7 @@ use lazy_static::lazy_static;
 use log::{error, info, warn};
 use rusqlite::{params, params_from_iter, Connection, Result};
 use std::collections::HashMap;
+use std::fmt::format;
 use std::sync::{Arc, Mutex};
 
 pub struct DB {
@@ -705,77 +707,205 @@ impl DB {
         }
     }
 
-    pub fn filter_posts(&self, field: &str, option: &FilterOption) -> Vec<Post> {
-        let address = match self.select_field(Some(field.to_string()), None) {
-            Ok(field) => field.address,
-            Err(e) => {
-                warn!("Field not found, error: {}", e);
-                return vec![];
+    fn sort_comments_candidate(&self, comments: &mut Vec<Comment>, option: &FilterOption) {
+        if option.ordering == Ordering::ByTimestamp {
+            return;
+        }
+
+        match option.ordering {
+            Ordering::ByScore => {
+                comments.sort_by(|a, b| a.score.cmp(&b.score));
             }
-        };
-
-        let mut sql =
-            "SELECT address, from_address, to_address, title, content, score, timestamp, upvote, downvote FROM post WHERE to = ?"
-                .to_string();
-        let mut params: Vec<&dyn rusqlite::ToSql> = vec![&address];
-        params.push(&address);
-
-        let mut score = TextualInteger::new("0");
-        let mut score_str = String::new();
-        if let Some(level) = option.level {
-            sql.push_str(" AND score > ?");
-            score = minimal_score_of_level(level);
-            score_str = score.to_string();
-            params.push(&score_str);
+            Ordering::ByUpVote => {
+                comments.sort_by(|a, b| a.upvote.cmp(&b.upvote));
+            }
+            Ordering::ByDownVote => {
+                comments.sort_by(|a, b| a.downvote.cmp(&b.downvote));
+            }
+            Ordering::ByUpvoteSubDownVote => {
+                comments.sort_by(|a, b| {
+                    (a.upvote as i128 - a.downvote as i128).cmp(&(b.upvote as i128 - b.downvote as i128))
+                });
+            }
+            _ => {}
         }
+        if !option.ascending {
+            comments.reverse();
+        }
+    }
 
-        let keyword_param = format!("%{}%", option.keyword.clone().unwrap());
+    fn filter_comment_by_level(&self, comments: &mut Vec<Comment>, _level: u8) {
+        comments.retain(|comment| {
+            let score = self.select_score(&comment.address, &comment.field_address);
+            level(&score.score) >= _level
+        });
+    }
+
+    fn fill_comment_score(&self, comment: &mut Comment) {
+        let score = self.select_score(&comment.address, &comment.field_address);
+        comment.score = score.score;
+        comment.upvote = score.upvote;
+        comment.downvote = score.downvote;
+    }
+
+    pub fn filter_comments(&self, to: &Address, option: &FilterOption) -> Result<Vec<Comment>, String> {
+        let mut sql = "SELECT address, from_address, to_address, field_address, content, timestamp FROM comment WHERE to_address = ?"
+            .to_string();
+        let mut params: Vec<&dyn rusqlite::ToSql> = vec![&to];
+
+        let mut keyword = String::new();
         if option.keyword.is_some() {
-            sql.push_str(" AND (title LIKE ? OR content LIKE ?)");
-            params.push(&keyword_param);
-            params.push(&keyword_param);
+            keyword = format!("%{}%", option.keyword.clone().unwrap());
+            sql.push_str(" AND content LIKE ?");
+            params.push(&keyword);
         }
 
-        if option.ascending_by_timestamp {
-            sql.push_str(" ORDER BY timestamp ASC");
-        } else {
-            sql.push_str(" ORDER BY timestamp DESC");
+        if option.ordering == Ordering::ByTimestamp {
+            sql.push_str(" ORDER BY timestamp");
+            if !option.ascending {
+                sql.push_str(" DESC");
+            }
         }
 
-        if option.ascending_by_absolute_score {
-            sql.push_str(", ABS(score) ASC");
-        } else {
-            sql.push_str(", ABS(score) DESC");
-        }
-
-        sql.push_str(" LIMIT ?");
-        params.push(&option.max_results);
-
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(&sql).unwrap();
-        let post_iter = stmt
-            .query_map(params_from_iter(params.iter()), |row| {
-                Ok(Post {
-                    address: row.get(0)?,
-                    from: row.get(1)?,
-                    to: row.get(2)?,
-                    title: row.get(3)?,
-                    content: row.get(4)?,
-                    score: TextualInteger::new(&row.get::<_, String>(5)?),
-                    timestamp: row.get(6)?,
-                    upvote: row.get(7)?,
-                    downvote: row.get(8)?,
-                    comments: HashMap::new(),
+        let mut comments = Vec::new();
+        {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn.prepare(&sql).map_err(|err| err.to_string())?;
+            let comment_iter = stmt
+                .query_map(params_from_iter(params.iter()), |row| {
+                    Ok(Comment {
+                        address: row.get(0)?,
+                        from: row.get(1)?,
+                        to: row.get(2)?,
+                        field_address: row.get(3)?,
+                        content: row.get(4)?,
+                        timestamp: row.get(5)?,
+                        score: TextualInteger::new("0"),
+                        upvote: 0,
+                        downvote: 0,
+                    })
                 })
-            })
-            .unwrap();
+                .unwrap();
+
+            for comment in comment_iter {
+                comments.push(comment.unwrap());
+            }
+        }
+
+        for comment in comments.iter_mut() {
+            self.fill_comment_score(comment);
+        }
+
+        self.sort_comments_candidate(&mut comments, option);
+        if option.level.is_some() {
+            self.filter_comment_by_level(&mut comments, option.level.unwrap());
+        }
+
+        comments.truncate(option.max_results as usize);
+
+        Ok(comments)
+    }
+
+    fn sort_posts_candidate(&self, posts: &mut Vec<Post>, option: &FilterOption) {
+        if option.ordering == Ordering::ByTimestamp {
+            return;
+        }
+
+        match option.ordering {
+            Ordering::ByScore => {
+                posts.sort_by(|a, b| a.score.cmp(&b.score));
+            }
+            Ordering::ByUpVote => {
+                posts.sort_by(|a, b| a.upvote.cmp(&b.upvote));
+            }
+            Ordering::ByDownVote => {
+                posts.sort_by(|a, b| a.downvote.cmp(&b.downvote));
+            }
+            Ordering::ByUpvoteSubDownVote => {
+                posts.sort_by(|a, b| {
+                    (a.upvote as i128 - a.downvote as i128).cmp(&(b.upvote as i128 - b.downvote as i128))
+                });
+            }
+            _ => {}
+        }
+        if !option.ascending {
+            posts.reverse();
+        }
+    }
+
+    fn filter_post_by_level(&self, posts: &mut Vec<Post>, _level: u8) {
+        posts.retain(|post| {
+            let score = self.select_score(&post.address, &post.to);
+            level(&score.score) >= _level
+        });
+    }
+
+    fn fill_post_score(&self, post: &mut Post) {
+        let score = self.select_score(&post.address, &post.to);
+        post.score = score.score;
+        post.upvote = score.upvote;
+        post.downvote = score.downvote;
+    }
+
+    pub fn filter_posts(&self, to: &Address, option: &FilterOption) -> Result<Vec<Post>, String> {
+        let mut sql =
+            "SELECT address, from_address, to_address, title, content, timestamp FROM post WHERE to_address = ?"
+                .to_string();
+        let mut params: Vec<&dyn rusqlite::ToSql> = vec![&to];
+
+        let mut keyword = String::new();
+        if option.keyword.is_some() {
+            keyword = format!("%{}%", option.keyword.clone().unwrap());
+            sql.push_str(" AND (content LIKE ? OR title LIKE ?)");
+            params.push(&keyword);
+            params.push(&keyword);
+        }
+
+        if option.ordering == Ordering::ByTimestamp {
+            sql.push_str(" ORDER BY timestamp");
+            if !option.ascending {
+                sql.push_str(" DESC");
+            }
+        }
 
         let mut posts = Vec::new();
-        for post in post_iter {
-            posts.push(post.unwrap());
+        {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn.prepare(&sql).map_err(|err| err.to_string())?;
+            let post_iter = stmt
+                .query_map(params_from_iter(params.iter()), |row| {
+                    Ok(Post {
+                        address: row.get(0)?,
+                        from: row.get(1)?,
+                        to: row.get(2)?,
+                        title: row.get(3)?,
+                        content: row.get(4)?,
+                        timestamp: row.get(5)?,
+                        score: TextualInteger::new("0"),
+                        upvote: 0,
+                        downvote: 0,
+                        comments: HashMap::new(),
+                    })
+                })
+                .unwrap();
+
+            for post in post_iter {
+                posts.push(post.unwrap());
+            }
         }
 
-        posts
+        for post in posts.iter_mut() {
+            self.fill_post_score(post);
+        }
+
+        self.sort_posts_candidate(&mut posts, option);
+        if option.level.is_some() {
+            self.filter_post_by_level(&mut posts, option.level.unwrap());
+        }
+
+        posts.truncate(option.max_results as usize);
+
+        Ok(posts)
     }
 }
 
@@ -1083,5 +1213,423 @@ mod tests {
 
         let score = db.select_score(&comment.address, &field.address);
         assert_eq!(score.score, TextualInteger::new("-1"));
+    }
+
+    fn make_comment(
+        db: &DB,
+        post: &Post,
+        score: TextualInteger,
+        timestamp: i64,
+        upvote: u64,
+        downvote: u64,
+        content: &str,
+    ) -> Comment {
+        let comment = Comment {
+            address: generate_unique_address(),
+            from: generate_unique_address(),
+            to: post.address.clone(),
+            content: content.to_string(),
+            score: score.clone(),
+            timestamp: timestamp,
+            upvote: upvote,
+            downvote: downvote,
+            field_address: post.to.clone(),
+        };
+        db.upsert_comment(&comment).unwrap();
+        comment
+    }
+
+    #[test]
+    fn test_filter_comments_ordering() {
+        let db = global_db();
+
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        let post = upsert_post(&db, &field.address).unwrap();
+
+        let comment1 = make_comment(&db, &post, TextualInteger::new("1"), 2, 3, 4, "");
+        let comment2 = make_comment(&db, &post, TextualInteger::new("2"), 3, 4, 1, "");
+        let comment3 = make_comment(&db, &post, TextualInteger::new("3"), 4, 1, 2, "");
+        let comment4 = make_comment(&db, &post, TextualInteger::new("4"), 1, 2, 3, "");
+
+        let mut filter_option = FilterOption {
+            level: None,
+            keyword: None,
+            ordering: Ordering::ByTimestamp,
+            ascending: true,
+            max_results: 10,
+        };
+        assert_eq!(
+            db.filter_comments(&post.address, &filter_option).unwrap(),
+            vec![comment4.clone(), comment1.clone(), comment2.clone(), comment3.clone()]
+        );
+
+        filter_option.ordering = Ordering::ByScore;
+        assert_eq!(
+            db.filter_comments(&post.address, &filter_option).unwrap(),
+            vec![comment1.clone(), comment2.clone(), comment3.clone(), comment4.clone()]
+        );
+
+        filter_option.ordering = Ordering::ByUpVote;
+        assert_eq!(
+            db.filter_comments(&post.address, &filter_option).unwrap(),
+            vec![comment3.clone(), comment4.clone(), comment1.clone(), comment2.clone()]
+        );
+
+        filter_option.ordering = Ordering::ByDownVote;
+        assert_eq!(
+            db.filter_comments(&post.address, &filter_option).unwrap(),
+            vec![comment2.clone(), comment3.clone(), comment4.clone(), comment1.clone()]
+        );
+
+        // -1 3 -1 -1
+        filter_option.ordering = Ordering::ByUpvoteSubDownVote;
+        filter_option.ascending = false;
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments[0], comment2);
+
+        filter_option.ordering = Ordering::ByTimestamp;
+        filter_option.ascending = false;
+        assert_eq!(
+            db.filter_comments(&post.address, &filter_option).unwrap(),
+            vec![comment3.clone(), comment2.clone(), comment1.clone(), comment4.clone()]
+        );
+    }
+
+    #[test]
+    fn test_filter_comment_level() {
+        let db = global_db();
+
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        let post = upsert_post(&db, &field.address).unwrap();
+
+        let comment1 = make_comment(&db, &post, TextualInteger::new("1"), 0, 0, 0, "");
+        let comment2 = make_comment(&db, &post, TextualInteger::new("100"), 1, 0, 0, "");
+        let comment3 = make_comment(&db, &post, TextualInteger::new("10000"), 2, 0, 0, "");
+        let comment4 = make_comment(&db, &post, TextualInteger::new("1000000"), 3, 0, 0, "");
+
+        let mut filter_option = FilterOption {
+            level: Some(0),
+            keyword: None,
+            ordering: Ordering::ByTimestamp,
+            ascending: true,
+            max_results: 10,
+        };
+
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 4);
+        assert_eq!(
+            comments,
+            vec![comment1.clone(), comment2.clone(), comment3.clone(), comment4.clone()]
+        );
+
+        filter_option.level = Some(1);
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 3);
+        assert_eq!(comments, vec![comment2.clone(), comment3.clone(), comment4.clone()]);
+
+        filter_option.level = Some(2);
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 2);
+
+        filter_option.level = Some(3);
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_comment_keyword() {
+        let db = global_db();
+
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        let post = upsert_post(&db, &field.address).unwrap();
+        let comment1 = make_comment(&db, &post, TextualInteger::new("1"), 0, 0, 0, "test comment 1");
+        let comment2 = make_comment(&db, &post, TextualInteger::new("1"), 1, 0, 0, "another test comment 2");
+        let comment3 = make_comment(&db, &post, TextualInteger::new("1"), 2, 0, 0, "comment 3");
+        let comment4 = make_comment(&db, &post, TextualInteger::new("1"), 3, 0, 0, "test keyword comment 4");
+
+        let mut filter_option = FilterOption {
+            level: None,
+            keyword: Some("test".to_string()),
+            ordering: Ordering::ByTimestamp,
+            ascending: true,
+            max_results: 10,
+        };
+
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 3);
+        assert_eq!(comments, vec![comment1.clone(), comment2.clone(), comment4.clone()]);
+
+        filter_option.keyword = Some("another".to_string());
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments, vec![comment2.clone()]);
+
+        filter_option.keyword = Some("comment 3".to_string());
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments, vec![comment3.clone()]);
+
+        filter_option.keyword = Some("nonexistent".to_string());
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 0);
+    }
+
+    #[test]
+    fn test_filter_comment_limit() {
+        let db = global_db();
+
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        let post = upsert_post(&db, &field.address).unwrap();
+        let comment1 = make_comment(&db, &post, TextualInteger::new("1"), 0, 0, 0, "");
+        let comment2 = make_comment(&db, &post, TextualInteger::new("1"), 1, 0, 0, "");
+        let comment3 = make_comment(&db, &post, TextualInteger::new("1"), 2, 0, 0, "");
+        let comment4 = make_comment(&db, &post, TextualInteger::new("1"), 3, 0, 0, "");
+
+        let mut filter_option = FilterOption {
+            level: None,
+            keyword: None,
+            ordering: Ordering::ByTimestamp,
+            ascending: true,
+            max_results: 0,
+        };
+
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 0);
+
+        filter_option.max_results = 1;
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments, vec![comment1.clone()]);
+
+        filter_option.max_results = 2;
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 2);
+        assert_eq!(comments, vec![comment1.clone(), comment2.clone()]);
+
+        filter_option.max_results = 3;
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 3);
+        assert_eq!(comments, vec![comment1.clone(), comment2.clone(), comment3.clone()]);
+
+        filter_option.max_results = 4;
+        let comments = db.filter_comments(&post.address, &filter_option).unwrap();
+        assert_eq!(comments.len(), 4);
+        assert_eq!(
+            comments,
+            vec![comment1.clone(), comment2.clone(), comment3.clone(), comment4.clone()]
+        );
+    }
+
+    fn make_post(
+        db: &DB,
+        field: &Field,
+        score: TextualInteger,
+        timestamp: i64,
+        upvote: u64,
+        downvote: u64,
+        title: &str,
+        content: &str,
+    ) -> Post {
+        let post = Post {
+            address: generate_unique_address(),
+            from: generate_unique_address(),
+            to: field.address.clone(),
+            title: title.to_string(),
+            content: content.to_string(),
+            score: score.clone(),
+            timestamp: timestamp,
+            upvote: upvote,
+            downvote: downvote,
+            comments: HashMap::new(),
+        };
+        db.upsert_post(&post).unwrap();
+        post
+    }
+
+    #[test]
+    fn test_filter_post_ordering() {
+        let db = global_db();
+
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        let post1 = make_post(&db, &field, TextualInteger::new("1"), 2, 3, 4, "", "");
+        let post2 = make_post(&db, &field, TextualInteger::new("2"), 3, 4, 1, "", "");
+        let post3 = make_post(&db, &field, TextualInteger::new("3"), 4, 1, 2, "", "");
+        let post4 = make_post(&db, &field, TextualInteger::new("4"), 1, 2, 3, "", "");
+
+        let mut filter_option = FilterOption {
+            level: None,
+            keyword: None,
+            ordering: Ordering::ByTimestamp,
+            ascending: true,
+            max_results: 10,
+        };
+        assert_eq!(
+            db.filter_posts(&field.address, &filter_option).unwrap(),
+            vec![post4.clone(), post1.clone(), post2.clone(), post3.clone()]
+        );
+
+        filter_option.ordering = Ordering::ByScore;
+        assert_eq!(
+            db.filter_posts(&field.address, &filter_option).unwrap(),
+            vec![post1.clone(), post2.clone(), post3.clone(), post4.clone()]
+        );
+
+        filter_option.ordering = Ordering::ByUpVote;
+        assert_eq!(
+            db.filter_posts(&field.address, &filter_option).unwrap(),
+            vec![post3.clone(), post4.clone(), post1.clone(), post2.clone()]
+        );
+
+        filter_option.ordering = Ordering::ByDownVote;
+        assert_eq!(
+            db.filter_posts(&field.address, &filter_option).unwrap(),
+            vec![post2.clone(), post3.clone(), post4.clone(), post1.clone()]
+        );
+
+        // -1 3 -1 -1
+        filter_option.ordering = Ordering::ByUpvoteSubDownVote;
+        filter_option.ascending = false;
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts[0], post2);
+
+        filter_option.ordering = Ordering::ByTimestamp;
+        filter_option.ascending = false;
+        assert_eq!(
+            db.filter_posts(&field.address, &filter_option).unwrap(),
+            vec![post3.clone(), post2.clone(), post1.clone(), post4.clone()]
+        );
+    }
+
+    #[test]
+    fn test_filter_post_level() {
+        let db = global_db();
+
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        let post1 = make_post(&db, &field, TextualInteger::new("1"), 0, 0, 0, "", "");
+        let post2 = make_post(&db, &field, TextualInteger::new("100"), 1, 0, 0, "", "");
+        let post3 = make_post(&db, &field, TextualInteger::new("10000"), 2, 0, 0, "", "");
+        let post4 = make_post(&db, &field, TextualInteger::new("1000000"), 3, 0, 0, "", "");
+
+        let mut filter_option = FilterOption {
+            level: Some(0),
+            keyword: None,
+            ordering: Ordering::ByTimestamp,
+            ascending: true,
+            max_results: 10,
+        };
+
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 4);
+        assert_eq!(posts, vec![post1.clone(), post2.clone(), post3.clone(), post4.clone()]);
+
+        filter_option.level = Some(1);
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 3);
+        assert_eq!(posts, vec![post2.clone(), post3.clone(), post4.clone()]);
+
+        filter_option.level = Some(2);
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 2);
+
+        filter_option.level = Some(3);
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_post_keyword() {
+        let db = global_db();
+
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        let post1 = make_post(&db, &field, TextualInteger::new("1"), 0, 0, 0, "test post 1", "");
+        let post2 = make_post(
+            &db,
+            &field,
+            TextualInteger::new("1"),
+            1,
+            0,
+            0,
+            "another test post 2",
+            "",
+        );
+        let post3 = make_post(&db, &field, TextualInteger::new("1"), 2, 0, 0, "post 3", "");
+        let post4 = make_post(
+            &db,
+            &field,
+            TextualInteger::new("1"),
+            3,
+            0,
+            0,
+            "test keyword post 4",
+            "",
+        );
+
+        let mut filter_option = FilterOption {
+            level: None,
+            keyword: Some("test".to_string()),
+            ordering: Ordering::ByTimestamp,
+            ascending: true,
+            max_results: 10,
+        };
+
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 3);
+        assert_eq!(posts, vec![post1.clone(), post2.clone(), post4.clone()]);
+
+        filter_option.keyword = Some("another".to_string());
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts, vec![post2.clone()]);
+
+        filter_option.keyword = Some("post 3".to_string());
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts, vec![post3.clone()]);
+
+        filter_option.keyword = Some("nonexistent".to_string());
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 0);
+    }
+
+    #[test]
+    fn test_filter_post_limit() {
+        let db = global_db();
+
+        let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
+        let post1 = make_post(&db, &field, TextualInteger::new("1"), 0, 0, 0, "", "");
+        let post2 = make_post(&db, &field, TextualInteger::new("1"), 1, 0, 0, "", "");
+        let post3 = make_post(&db, &field, TextualInteger::new("1"), 2, 0, 0, "", "");
+        let post4 = make_post(&db, &field, TextualInteger::new("1"), 3, 0, 0, "", "");
+
+        let mut filter_option = FilterOption {
+            level: None,
+            keyword: None,
+            ordering: Ordering::ByTimestamp,
+            ascending: true,
+            max_results: 0,
+        };
+
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 0);
+
+        filter_option.max_results = 1;
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts, vec![post1.clone()]);
+
+        filter_option.max_results = 2;
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 2);
+        assert_eq!(posts, vec![post1.clone(), post2.clone()]);
+
+        filter_option.max_results = 3;
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 3);
+        assert_eq!(posts, vec![post1.clone(), post2.clone(), post3.clone()]);
+
+        filter_option.max_results = 4;
+        let posts = db.filter_posts(&field.address, &filter_option).unwrap();
+        assert_eq!(posts.len(), 4);
+        assert_eq!(posts, vec![post1.clone(), post2.clone(), post3.clone(), post4.clone()]);
     }
 }
