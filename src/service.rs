@@ -8,6 +8,7 @@ use lazy_static::lazy_static;
 use rouille::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use crate::db_trait::Database;
 
 lazy_static! {
     static ref GLOBAL_SESSION_STORGE: Mutex<HashMap<String, SessionStorage>> = Mutex::new(HashMap::new());

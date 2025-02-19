@@ -1,6 +1,7 @@
 use crate::db::global_db;
 use crate::post::Post;
 use crate::Address;
+use crate::db_trait::Database;
 
 #[derive(Debug, PartialEq)]
 pub struct Field {

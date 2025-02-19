@@ -1,3 +1,4 @@
+use crate::db_trait::Database;
 use crate::field::Ordering;
 use crate::field::*;
 use crate::generate_unique_name;
@@ -12,201 +13,26 @@ use log::{error, info, warn};
 use rusqlite::{params, params_from_iter, Connection, Result};
 use std::sync::{Arc, Mutex};
 
-pub struct DB {
+pub struct Sqlite {
     conn: Mutex<rusqlite::Connection>,
-
-    db_path: String,
 }
 
 lazy_static! {
-    pub static ref GLOBAL_DB: Arc<DB> = {
-        let db = DB::new("database.sqlite").expect("Failed to initialize database");
+    static ref GLOBAL_DB: Arc<Sqlite> = {
+        let db = Sqlite::new("database.sqlite").expect("Failed to initialize database");
         db.init().expect("Failed to initialize database schema");
         Arc::new(db)
     };
 }
 
-pub fn global_db() -> Arc<DB> {
+pub fn global_db() -> Arc<Sqlite> {
     GLOBAL_DB.clone()
 }
 
-impl DB {
+impl Sqlite {
     fn new(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
-        Ok(DB {
-            conn: Mutex::new(conn),
-            db_path: path.to_string(),
-        })
-    }
-
-    /// Initializes the database schema by creating necessary tables if they do not exist.
-    ///
-    /// # Tables
-    ///
-    /// ## `user`
-    /// | Column  | Type | Constraints     |
-    /// |---------|------|-----------------|
-    /// | address | TEXT | PRIMARY KEY     |
-    /// | name    | TEXT | NOT NULL        |
-    ///
-    /// ## `fields`
-    /// | Column  | Type | Constraints     |
-    /// |---------|------|-----------------|
-    /// | address | TEXT | PRIMARY KEY     |
-    /// | name    | TEXT | NOT NULL        |
-    ///
-    /// ## `score`
-    /// | Column        | Type    | Constraints     |
-    /// |---------------|---------|-----------------|
-    /// | address       | TEXT    | PRIMARY KEY     |
-    /// | field_address | TEXT    | NOT NULL        |
-    /// | score         | TEXT | NOT NULL        |
-    /// | upvote        | INTEGER | NOT NULL        |
-    /// | downvote      | INTEGER | NOT NULL        |
-    ///
-    /// ## `post`
-    /// | Column       | Type    | Constraints     |
-    /// |--------------|---------|-----------------|
-    /// | address      | TEXT    | PRIMARY KEY     |
-    /// | from_address | TEXT    | NOT NULL        |
-    /// | to_address   | TEXT    | NOT NULL        |
-    /// | title        | TEXT    | NOT NULL        |
-    /// | content      | TEXT    | NOT NULL        |
-    /// | timestamp    | INTEGER | NOT NULL        |
-    ///
-    /// ## `comment`
-    /// | Column       | Type    | Constraints     |
-    /// |--------------|---------|-----------------|
-    /// | address      | TEXT    | PRIMARY KEY     |
-    /// | from_address | TEXT    | NOT NULL        |
-    /// | to_address   | TEXT    | NOT NULL        |
-    /// | field_address| TEXT    | NOT NULL        |
-    /// | content      | TEXT    | NOT NULL        |
-    /// | timestamp    | INTEGER | NOT NULL        |
-    ///
-    /// ## `votes`
-    /// | Column              | Type    | Constraints     |
-    /// |---------------------|---------|-----------------|
-    /// | to_address          | TEXT    | NOT NULL        |
-    /// | from_address        | TEXT    | NOT NULL        |
-    /// | voted_score         | TEXT    | NOT NULL        |
-    ///
-    pub fn init(&self) -> Result<()> {
-        // Check and create 'user' table
-        let user_table_exists: bool = self.conn.lock().unwrap().query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='user');",
-            params![],
-            |row| row.get(0),
-        )?;
-
-        if !user_table_exists {
-            self.conn.lock().unwrap().execute(
-                "CREATE TABLE IF NOT EXISTS user (
-                    address TEXT PRIMARY KEY, 
-                    name TEXT NOT NULL
-                )",
-                params![],
-            )?;
-        }
-
-        // Check and create 'fields' table
-        let fields_table_exists: bool = self.conn.lock().unwrap().query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='fields');",
-            params![],
-            |row| row.get(0),
-        )?;
-
-        if !fields_table_exists {
-            self.conn.lock().unwrap().execute(
-                "CREATE TABLE IF NOT EXISTS fields (
-                    address TEXT PRIMARY KEY, 
-                    name TEXT NOT NULL
-                )",
-                params![],
-            )?;
-        }
-
-        // Check and create 'score' table
-        let score_table_exists: bool = self.conn.lock().unwrap().query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='score');",
-            params![],
-            |row| row.get(0),
-        )?;
-
-        if !score_table_exists {
-            self.conn.lock().unwrap().execute(
-                "CREATE TABLE IF NOT EXISTS score (
-            address TEXT PRIMARY KEY,
-            field_address TEXT NOT NULL,
-            score TEXT NOT NULL,
-            upvote INTEGER NOT NULL,
-            downvote INTEGER NOT NULL
-        )",
-                params![],
-            )?;
-        }
-
-        // Check and create 'post' table
-        let post_table_exists: bool = self.conn.lock().unwrap().query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='post');",
-            params![],
-            |row| row.get(0),
-        )?;
-
-        if !post_table_exists {
-            self.conn.lock().unwrap().execute(
-                "CREATE TABLE IF NOT EXISTS post (
-            address TEXT PRIMARY KEY,
-            from_address TEXT NOT NULL,
-            to_address TEXT NOT NULL, 
-            title TEXT NOT NULL, 
-            content TEXT NOT NULL,
-            timestamp INTEGER NOT NULL
-        )",
-                params![],
-            )?;
-        }
-
-        // Check and create 'comment' table
-        let comment_table_exists: bool = self.conn.lock().unwrap().query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='comment');",
-            params![],
-            |row| row.get(0),
-        )?;
-
-        if !comment_table_exists {
-            self.conn.lock().unwrap().execute(
-                "CREATE TABLE IF NOT EXISTS comment (
-                    address TEXT PRIMARY KEY,
-                    from_address TEXT NOT NULL,
-                    to_address TEXT NOT NULL, 
-                    field_address TEXT NOT NULL, 
-                    content TEXT NOT NULL,
-                    timestamp INTEGER NOT NULL
-                )",
-                params![],
-            )?;
-        }
-
-        // Check and create 'votes' table
-        let votes_table_exists: bool = self.conn.lock().unwrap().query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='votes');",
-            params![],
-            |row| row.get(0),
-        )?;
-
-        if !votes_table_exists {
-            self.conn.lock().unwrap().execute(
-                "CREATE TABLE IF NOT EXISTS votes (
-                        from_address TEXT NOT NULL,
-                        to_address TEXT NOT NULL,
-                        voted_score TEXT NOT NULL
-                    )",
-                params![],
-            )?;
-        }
-
-        Ok(())
+        Ok(Sqlite { conn: Mutex::new(conn) })
     }
 
     fn vote(
@@ -275,115 +101,6 @@ impl DB {
         Ok(())
     }
 
-    pub fn upvote(
-        &self,
-        from: &Address,
-        to: &Address,
-        voted_score: TextualInteger,
-        field_address: &str,
-    ) -> Result<(), String> {
-        self.vote(from, to, voted_score, field_address)
-    }
-
-    // voted score could be negative
-    pub fn downvote(
-        &self,
-        from: &Address,
-        to: &Address,
-        voted_score: TextualInteger,
-        field_address: &str,
-    ) -> Result<(), String> {
-        self.vote(from, to, voted_score, field_address)
-    }
-
-    pub fn upsert_user(&self, address: Address, name: String) -> Result<(), String> {
-        let name_exists: bool = self
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT EXISTS(SELECT * FROM user WHERE name=(?1))",
-                params![name],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())
-            .unwrap();
-
-        if name_exists {
-            return Err("Name already exists".to_string());
-        }
-
-        match self.conn.lock().unwrap().execute(
-            "INSERT OR REPLACE INTO user (address, name) VALUES (?1, ?2)",
-            params![address, name],
-        ) {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                error!("Failed to create new user: {}", e);
-                Err(e.to_string())
-            }
-        }
-    }
-
-    pub fn select_user(&self, name: Option<String>, address: Option<Address>) -> Option<User> {
-        match self.conn.lock().unwrap().query_row(
-            "SELECT name, address FROM user WHERE name = ?1 OR address = ?2",
-            params![name, address],
-            |row| {
-                Ok(User {
-                    name: row.get(0)?,
-                    address: row.get(1)?,
-                })
-            },
-        ) {
-            Ok(user) => Some(user),
-            Err(e) => {
-                warn!("Failed to get user by name or address: {}", e);
-                None
-            }
-        }
-    }
-
-    pub fn select_score(&self, address: &str, field_address: &str) -> Score {
-        let conn = self.conn.lock().unwrap();
-        match conn.query_row(
-            "SELECT address, field_address, score, upvote, downvote FROM score WHERE address = ?1 AND field_address = ?2",
-            params![address, field_address],
-            |row| {
-                Ok(Score {
-                    address: row.get(0)?,
-                    field_address: row.get(1)?,
-                    score: TextualInteger::new(&row.get::<_, String>(2)?),
-                    upvote: row.get(3)?,
-                    downvote: row.get(4)?,
-                })
-            },
-        ) {
-            Ok(score) => score,
-            Err(e) => {
-                Score { address:address.to_string(), field_address: field_address.to_string(), score: TextualInteger::new("0"), upvote: 0, downvote: 0 }
-            }
-        }
-    }
-
-    pub fn select_all_fields(&self) -> Vec<Field> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT address, name FROM fields").unwrap();
-        let field_iter = stmt.query_map([], |row| {
-            Ok(Field {
-                address: row.get(0)?,
-                name: row.get(1)?,
-            })
-        });
-
-        let mut fields = Vec::new();
-        for field in field_iter.unwrap() {
-            fields.push(field.unwrap());
-        }
-
-        fields
-    }
-
     fn select_field_of_comment(&self, address: &Address) -> Result<Address, String> {
         let conn = self.conn.lock().unwrap();
         match conn.query_row(
@@ -395,38 +112,6 @@ impl DB {
             Ok(field_address) => Ok(field_address),
             Err(e) => {
                 warn!("Failed to get field address by comment address: {}", e);
-                Err(e.to_string())
-            }
-        }
-    }
-
-    pub fn select_comment(&self, address: &Address) -> Result<Comment, String> {
-        let field_address = self.select_field_of_comment(&address)?;
-        let score = self.select_score(address, &field_address);
-
-        let db = self.conn.lock().unwrap();
-        match db.query_row(
-            "SELECT address, from_address, to_address, content, timestamp, field_address
-            FROM comment WHERE address = ?1",
-            params![address],
-            |row| {
-                Ok(Comment {
-                    address: row.get(0)?,
-                    from: row.get(1)?,
-                    to: row.get(2)?,
-                    content: row.get(3)?,
-                    score: score.score,
-                    timestamp: row.get(4)?,
-                    upvote: score.upvote,
-                    downvote: score.downvote,
-                    field_address: row.get(5)?,
-                    comments: Vec::new(),
-                })
-            },
-        ) {
-            Ok(comment) => Ok(comment),
-            Err(e) => {
-                warn!("Failed to get comment by address: {}", e);
                 Err(e.to_string())
             }
         }
@@ -499,8 +184,456 @@ impl DB {
             }
         }
     }
+    fn sort_comments_candidate(&self, comments: &mut Vec<Comment>, option: &FilterOption) {
+        if option.ordering == Ordering::ByTimestamp {
+            return;
+        }
 
-    pub fn upsert_comment(&self, comment: &Comment) -> Result<(), String> {
+        match option.ordering {
+            Ordering::ByScore => {
+                comments.sort_by(|a, b| a.score.cmp(&b.score));
+            }
+            Ordering::ByUpVote => {
+                comments.sort_by(|a, b| a.upvote.cmp(&b.upvote));
+            }
+            Ordering::ByDownVote => {
+                comments.sort_by(|a, b| a.downvote.cmp(&b.downvote));
+            }
+            Ordering::ByUpvoteSubDownVote => {
+                comments.sort_by(|a, b| {
+                    (a.upvote as i128 - a.downvote as i128).cmp(&(b.upvote as i128 - b.downvote as i128))
+                });
+            }
+            _ => {}
+        }
+        if !option.ascending {
+            comments.reverse();
+        }
+    }
+
+    fn filter_comment_by_level(&self, comments: &mut Vec<Comment>, _level: u8) {
+        comments.retain(|comment| {
+            let score = self.select_score(&comment.address, &comment.field_address);
+            level(&score.score) >= _level
+        });
+    }
+
+    fn fill_comment_score(&self, comment: &mut Comment) {
+        let score = self.select_score(&comment.address, &comment.field_address);
+        comment.score = score.score;
+        comment.upvote = score.upvote;
+        comment.downvote = score.downvote;
+    }
+
+    fn sort_posts_candidate(&self, posts: &mut Vec<Post>, option: &FilterOption) {
+        if option.ordering == Ordering::ByTimestamp {
+            return;
+        }
+
+        match option.ordering {
+            Ordering::ByScore => {
+                posts.sort_by(|a, b| a.score.cmp(&b.score));
+            }
+            Ordering::ByUpVote => {
+                posts.sort_by(|a, b| a.upvote.cmp(&b.upvote));
+            }
+            Ordering::ByDownVote => {
+                posts.sort_by(|a, b| a.downvote.cmp(&b.downvote));
+            }
+            Ordering::ByUpvoteSubDownVote => {
+                posts.sort_by(|a, b| {
+                    (a.upvote as i128 - a.downvote as i128).cmp(&(b.upvote as i128 - b.downvote as i128))
+                });
+            }
+            _ => {}
+        }
+        if !option.ascending {
+            posts.reverse();
+        }
+    }
+
+    fn filter_post_by_level(&self, posts: &mut Vec<Post>, _level: u8) {
+        posts.retain(|post| {
+            let score = self.select_score(&post.address, &post.to);
+            level(&score.score) >= _level
+        });
+    }
+
+    fn fill_post_score(&self, post: &mut Post) {
+        let score = self.select_score(&post.address, &post.to);
+        post.score = score.score;
+        post.upvote = score.upvote;
+        post.downvote = score.downvote;
+    }
+}
+
+impl Database for Sqlite {
+    /// Initializes the database schema by creating necessary tables if they do not exist.
+    ///
+    /// # Tables
+    ///
+    /// ## `user`
+    /// | Column  | Type | Constraints     |
+    /// |---------|------|-----------------|
+    /// | address | TEXT | PRIMARY KEY     |
+    /// | name    | TEXT | NOT NULL        |
+    ///
+    /// ## `fields`
+    /// | Column  | Type | Constraints     |
+    /// |---------|------|-----------------|
+    /// | address | TEXT | PRIMARY KEY     |
+    /// | name    | TEXT | NOT NULL        |
+    ///
+    /// ## `score`
+    /// | Column        | Type    | Constraints     |
+    /// |---------------|---------|-----------------|
+    /// | address       | TEXT    | PRIMARY KEY     |
+    /// | field_address | TEXT    | NOT NULL        |
+    /// | score         | TEXT | NOT NULL        |
+    /// | upvote        | INTEGER | NOT NULL        |
+    /// | downvote      | INTEGER | NOT NULL        |
+    ///
+    /// ## `post`
+    /// | Column       | Type    | Constraints     |
+    /// |--------------|---------|-----------------|
+    /// | address      | TEXT    | PRIMARY KEY     |
+    /// | from_address | TEXT    | NOT NULL        |
+    /// | to_address   | TEXT    | NOT NULL        |
+    /// | title        | TEXT    | NOT NULL        |
+    /// | content      | TEXT    | NOT NULL        |
+    /// | timestamp    | INTEGER | NOT NULL        |
+    ///
+    /// ## `comment`
+    /// | Column       | Type    | Constraints     |
+    /// |--------------|---------|-----------------|
+    /// | address      | TEXT    | PRIMARY KEY     |
+    /// | from_address | TEXT    | NOT NULL        |
+    /// | to_address   | TEXT    | NOT NULL        |
+    /// | field_address| TEXT    | NOT NULL        |
+    /// | content      | TEXT    | NOT NULL        |
+    /// | timestamp    | INTEGER | NOT NULL        |
+    ///
+    /// ## `votes`
+    /// | Column              | Type    | Constraints     |
+    /// |---------------------|---------|-----------------|
+    /// | to_address          | TEXT    | NOT NULL        |
+    /// | from_address        | TEXT    | NOT NULL        |
+    /// | voted_score         | TEXT    | NOT NULL        |
+    ///
+    fn init(&self) -> Result<(), String> {
+        // Check and create 'user' table
+        let user_table_exists: bool = self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='user');",
+                params![],
+                |row| row.get(0),
+            )
+            .map_err(|err| err.to_string())?;
+
+        if !user_table_exists {
+            self.conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "CREATE TABLE IF NOT EXISTS user (
+                    address TEXT PRIMARY KEY, 
+                    name TEXT NOT NULL
+                )",
+                    params![],
+                )
+                .map_err(|err| err.to_string())?;
+        }
+
+        // Check and create 'fields' table
+        let fields_table_exists: bool = self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='fields');",
+                params![],
+                |row| row.get(0),
+            )
+            .map_err(|err| err.to_string())?;
+
+        if !fields_table_exists {
+            self.conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "CREATE TABLE IF NOT EXISTS fields (
+                    address TEXT PRIMARY KEY, 
+                    name TEXT NOT NULL
+                )",
+                    params![],
+                )
+                .map_err(|err| err.to_string())?;
+        }
+
+        // Check and create 'score' table
+        let score_table_exists: bool = self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='score');",
+                params![],
+                |row| row.get(0),
+            )
+            .map_err(|err| err.to_string())?;
+
+        if !score_table_exists {
+            self.conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "CREATE TABLE IF NOT EXISTS score (
+            address TEXT PRIMARY KEY,
+            field_address TEXT NOT NULL,
+            score TEXT NOT NULL,
+            upvote INTEGER NOT NULL,
+            downvote INTEGER NOT NULL
+        )",
+                    params![],
+                )
+                .map_err(|err| err.to_string())?;
+        }
+
+        // Check and create 'post' table
+        let post_table_exists: bool = self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='post');",
+                params![],
+                |row| row.get(0),
+            )
+            .map_err(|err| err.to_string())?;
+
+        if !post_table_exists {
+            self.conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "CREATE TABLE IF NOT EXISTS post (
+            address TEXT PRIMARY KEY,
+            from_address TEXT NOT NULL,
+            to_address TEXT NOT NULL, 
+            title TEXT NOT NULL, 
+            content TEXT NOT NULL,
+            timestamp INTEGER NOT NULL
+        )",
+                    params![],
+                )
+                .map_err(|err| err.to_string())?;
+        }
+
+        // Check and create 'comment' table
+        let comment_table_exists: bool = self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='comment');",
+                params![],
+                |row| row.get(0),
+            )
+            .map_err(|err| err.to_string())?;
+
+        if !comment_table_exists {
+            self.conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "CREATE TABLE IF NOT EXISTS comment (
+                    address TEXT PRIMARY KEY,
+                    from_address TEXT NOT NULL,
+                    to_address TEXT NOT NULL, 
+                    field_address TEXT NOT NULL, 
+                    content TEXT NOT NULL,
+                    timestamp INTEGER NOT NULL
+                )",
+                    params![],
+                )
+                .map_err(|err| err.to_string())?;
+        }
+
+        // Check and create 'votes' table
+        let votes_table_exists: bool = self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='votes');",
+                params![],
+                |row| row.get(0),
+            )
+            .map_err(|err| err.to_string())?;
+
+        if !votes_table_exists {
+            self.conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "CREATE TABLE IF NOT EXISTS votes (
+                        from_address TEXT NOT NULL,
+                        to_address TEXT NOT NULL,
+                        voted_score TEXT NOT NULL
+                    )",
+                    params![],
+                )
+                .map_err(|err| err.to_string())?;
+        }
+
+        Ok(())
+    }
+
+    fn upvote(
+        &self,
+        from: &Address,
+        to: &Address,
+        voted_score: TextualInteger,
+        field_address: &str,
+    ) -> Result<(), String> {
+        self.vote(from, to, voted_score, field_address)
+    }
+
+    // voted score could be negative
+    fn downvote(
+        &self,
+        from: &Address,
+        to: &Address,
+        voted_score: TextualInteger,
+        field_address: &str,
+    ) -> Result<(), String> {
+        self.vote(from, to, voted_score, field_address)
+    }
+
+    fn upsert_user(&self, address: Address, name: String) -> Result<(), String> {
+        let name_exists: bool = self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT * FROM user WHERE name=(?1))",
+                params![name],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())
+            .unwrap();
+
+        if name_exists {
+            return Err("Name already exists".to_string());
+        }
+
+        match self.conn.lock().unwrap().execute(
+            "INSERT OR REPLACE INTO user (address, name) VALUES (?1, ?2)",
+            params![address, name],
+        ) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                error!("Failed to create new user: {}", e);
+                Err(e.to_string())
+            }
+        }
+    }
+
+    fn select_user(&self, name: Option<String>, address: Option<Address>) -> Option<User> {
+        match self.conn.lock().unwrap().query_row(
+            "SELECT name, address FROM user WHERE name = ?1 OR address = ?2",
+            params![name, address],
+            |row| {
+                Ok(User {
+                    name: row.get(0)?,
+                    address: row.get(1)?,
+                })
+            },
+        ) {
+            Ok(user) => Some(user),
+            Err(e) => {
+                warn!("Failed to get user by name or address: {}", e);
+                None
+            }
+        }
+    }
+
+    fn select_score(&self, address: &str, field_address: &str) -> Score {
+        let conn = self.conn.lock().unwrap();
+        match conn.query_row(
+            "SELECT address, field_address, score, upvote, downvote FROM score WHERE address = ?1 AND field_address = ?2",
+            params![address, field_address],
+            |row| {
+                Ok(Score {
+                    address: row.get(0)?,
+                    field_address: row.get(1)?,
+                    score: TextualInteger::new(&row.get::<_, String>(2)?),
+                    upvote: row.get(3)?,
+                    downvote: row.get(4)?,
+                })
+            },
+        ) {
+            Ok(score) => score,
+            Err(e) => {
+                Score { address:address.to_string(), field_address: field_address.to_string(), score: TextualInteger::new("0"), upvote: 0, downvote: 0 }
+            }
+        }
+    }
+
+    fn select_all_fields(&self) -> Vec<Field> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT address, name FROM fields").unwrap();
+        let field_iter = stmt.query_map([], |row| {
+            Ok(Field {
+                address: row.get(0)?,
+                name: row.get(1)?,
+            })
+        });
+
+        let mut fields = Vec::new();
+        for field in field_iter.unwrap() {
+            fields.push(field.unwrap());
+        }
+
+        fields
+    }
+
+    fn select_comment(&self, address: &Address) -> Result<Comment, String> {
+        let field_address = self.select_field_of_comment(&address)?;
+        let score = self.select_score(address, &field_address);
+
+        let db = self.conn.lock().unwrap();
+        match db.query_row(
+            "SELECT address, from_address, to_address, content, timestamp, field_address
+            FROM comment WHERE address = ?1",
+            params![address],
+            |row| {
+                Ok(Comment {
+                    address: row.get(0)?,
+                    from: row.get(1)?,
+                    to: row.get(2)?,
+                    content: row.get(3)?,
+                    score: score.score,
+                    timestamp: row.get(4)?,
+                    upvote: score.upvote,
+                    downvote: score.downvote,
+                    field_address: row.get(5)?,
+                    comments: Vec::new(),
+                })
+            },
+        ) {
+            Ok(comment) => Ok(comment),
+            Err(e) => {
+                warn!("Failed to get comment by address: {}", e);
+                Err(e.to_string())
+            }
+        }
+    }
+
+    fn upsert_comment(&self, comment: &Comment) -> Result<(), String> {
         self.select_or_insert_user(&comment.from)?;
         let post_result = self.select_post(&comment.to.clone());
         let comment_result = self.select_comment(&comment.to.clone());
@@ -561,7 +694,7 @@ impl DB {
         }
     }
 
-    pub fn select_post(&self, address: &str) -> Result<Post, String> {
+    fn select_post(&self, address: &str) -> Result<Post, String> {
         let mut post = match self.conn.lock().unwrap().query_row(
             "SELECT address, from_address, to_address, title, content, timestamp FROM post WHERE address = ?1",
             params![address],
@@ -593,7 +726,7 @@ impl DB {
 
     // this allow anonymous user's post
     // and record this user in db with a random name
-    pub fn upsert_post(&self, post: &Post) -> Result<(), String> {
+    fn upsert_post(&self, post: &Post) -> Result<(), String> {
         self.select_field(None, Some(post.to.clone()))?;
         self.select_or_insert_user(&post.from)?;
 
@@ -625,7 +758,7 @@ impl DB {
         }
     }
 
-    pub fn insert_field(&self, field: &Field) -> Result<(), String> {
+    fn insert_field(&self, field: &Field) -> Result<(), String> {
         match self.conn.lock().unwrap().execute(
             "INSERT INTO fields (address, name) VALUES (?1, ?2)",
             params![field.address, field.name],
@@ -641,7 +774,7 @@ impl DB {
         }
     }
 
-    pub fn select_field(&self, name: Option<String>, address: Option<Address>) -> Result<Field, String> {
+    fn select_field(&self, name: Option<String>, address: Option<Address>) -> Result<Field, String> {
         if name.is_some() {
             match self.conn.lock().unwrap().query_row(
                 "SELECT address, name FROM fields WHERE name = ?1",
@@ -686,7 +819,7 @@ impl DB {
         }
     }
 
-    pub fn field_by_address(&self, comment_or_post_id: &Address) -> Option<Field> {
+    fn field_by_address(&self, comment_or_post_id: &Address) -> Option<Field> {
         match self.conn.lock().unwrap().query_row(
             "SELECT address, name FROM fields WHERE address = ?1",
             params![comment_or_post_id],
@@ -705,48 +838,7 @@ impl DB {
         }
     }
 
-    fn sort_comments_candidate(&self, comments: &mut Vec<Comment>, option: &FilterOption) {
-        if option.ordering == Ordering::ByTimestamp {
-            return;
-        }
-
-        match option.ordering {
-            Ordering::ByScore => {
-                comments.sort_by(|a, b| a.score.cmp(&b.score));
-            }
-            Ordering::ByUpVote => {
-                comments.sort_by(|a, b| a.upvote.cmp(&b.upvote));
-            }
-            Ordering::ByDownVote => {
-                comments.sort_by(|a, b| a.downvote.cmp(&b.downvote));
-            }
-            Ordering::ByUpvoteSubDownVote => {
-                comments.sort_by(|a, b| {
-                    (a.upvote as i128 - a.downvote as i128).cmp(&(b.upvote as i128 - b.downvote as i128))
-                });
-            }
-            _ => {}
-        }
-        if !option.ascending {
-            comments.reverse();
-        }
-    }
-
-    fn filter_comment_by_level(&self, comments: &mut Vec<Comment>, _level: u8) {
-        comments.retain(|comment| {
-            let score = self.select_score(&comment.address, &comment.field_address);
-            level(&score.score) >= _level
-        });
-    }
-
-    fn fill_comment_score(&self, comment: &mut Comment) {
-        let score = self.select_score(&comment.address, &comment.field_address);
-        comment.score = score.score;
-        comment.upvote = score.upvote;
-        comment.downvote = score.downvote;
-    }
-
-    pub fn filter_comments(&self, to: &Address, option: &FilterOption) -> Result<Vec<Comment>, String> {
+    fn filter_comments(&self, to: &Address, option: &FilterOption) -> Result<Vec<Comment>, String> {
         let mut sql = "SELECT address, from_address, to_address, field_address, content, timestamp FROM comment WHERE to_address = ?"
             .to_string();
         let mut params: Vec<&dyn rusqlite::ToSql> = vec![&to];
@@ -805,48 +897,7 @@ impl DB {
         Ok(comments)
     }
 
-    fn sort_posts_candidate(&self, posts: &mut Vec<Post>, option: &FilterOption) {
-        if option.ordering == Ordering::ByTimestamp {
-            return;
-        }
-
-        match option.ordering {
-            Ordering::ByScore => {
-                posts.sort_by(|a, b| a.score.cmp(&b.score));
-            }
-            Ordering::ByUpVote => {
-                posts.sort_by(|a, b| a.upvote.cmp(&b.upvote));
-            }
-            Ordering::ByDownVote => {
-                posts.sort_by(|a, b| a.downvote.cmp(&b.downvote));
-            }
-            Ordering::ByUpvoteSubDownVote => {
-                posts.sort_by(|a, b| {
-                    (a.upvote as i128 - a.downvote as i128).cmp(&(b.upvote as i128 - b.downvote as i128))
-                });
-            }
-            _ => {}
-        }
-        if !option.ascending {
-            posts.reverse();
-        }
-    }
-
-    fn filter_post_by_level(&self, posts: &mut Vec<Post>, _level: u8) {
-        posts.retain(|post| {
-            let score = self.select_score(&post.address, &post.to);
-            level(&score.score) >= _level
-        });
-    }
-
-    fn fill_post_score(&self, post: &mut Post) {
-        let score = self.select_score(&post.address, &post.to);
-        post.score = score.score;
-        post.upvote = score.upvote;
-        post.downvote = score.downvote;
-    }
-
-    pub fn filter_posts(&self, to: &Address, option: &FilterOption) -> Result<Vec<Post>, String> {
+    fn filter_posts(&self, to: &Address, option: &FilterOption) -> Result<Vec<Post>, String> {
         let mut sql =
             "SELECT address, from_address, to_address, title, content, timestamp FROM post WHERE to_address = ?"
                 .to_string();
@@ -948,7 +999,7 @@ mod tests {
         assert_eq!(user.name, new_name);
     }
 
-    fn create_field(db: &DB, address: &Address, name: &str) -> Result<Field, String> {
+    fn create_field(db: &Sqlite, address: &Address, name: &str) -> Result<Field, String> {
         let field = Field {
             address: address.clone(),
             name: name.to_string(),
@@ -963,7 +1014,7 @@ mod tests {
         }
     }
 
-    fn upsert_post(db: &DB, field_address: &Address) -> Result<Post, String> {
+    fn upsert_post(db: &Sqlite, field_address: &Address) -> Result<Post, String> {
         let post = Post::new(
             generate_unique_address(),
             field_address.clone(),
@@ -980,7 +1031,7 @@ mod tests {
         }
     }
 
-    fn upsert_comment(db: &DB, to: &Address, field_address: &Address) -> Result<Comment, String> {
+    fn upsert_comment(db: &Sqlite, to: &Address, field_address: &Address) -> Result<Comment, String> {
         let comment = Comment {
             address: generate_unique_address(),
             from: generate_unique_address(),
@@ -1051,21 +1102,21 @@ mod tests {
         upsert_comment(&db, &comment1.address, &post.to).unwrap();
     }
 
-    fn assert_user_score_eqs(db: &DB, field: &Field, user_address: &Address, score: TextualInteger) {
+    fn assert_user_score_eqs(db: &Sqlite, field: &Field, user_address: &Address, score: TextualInteger) {
         assert_eq!(db.select_score(user_address, &field.address).score, score);
     }
 
-    fn assert_post_score_eqs(db: &DB, field: &Field, post_address: &Address, score: TextualInteger) {
+    fn assert_post_score_eqs(db: &Sqlite, field: &Field, post_address: &Address, score: TextualInteger) {
         let post_score = db.select_score(&post_address, &field.address).score;
         assert_eq!(post_score, score);
     }
 
-    fn assert_comment_sore_equals(db: &DB, field: &Field, comment_address: &Address, score: TextualInteger) {
+    fn assert_comment_sore_equals(db: &Sqlite, field: &Field, comment_address: &Address, score: TextualInteger) {
         let comment_score = db.select_score(&comment_address, &field.address).score;
         assert_eq!(comment_score, score);
     }
 
-    fn init_field_user_post_comment() -> (Arc<DB>, Field, Post, Comment, User) {
+    fn init_field_user_post_comment() -> (Arc<Sqlite>, Field, Post, Comment, User) {
         let db = global_db();
 
         let field = create_field(&db, &generate_unique_address(), &generate_unique_name()).unwrap();
@@ -1216,7 +1267,7 @@ mod tests {
     }
 
     fn make_comment(
-        db: &DB,
+        db: &Sqlite,
         post: &Post,
         score: TextualInteger,
         timestamp: i64,
@@ -1422,7 +1473,7 @@ mod tests {
     }
 
     fn make_post(
-        db: &DB,
+        db: &Sqlite,
         field: &Field,
         score: TextualInteger,
         timestamp: i64,

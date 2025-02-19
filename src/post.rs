@@ -4,6 +4,7 @@ use crate::field::FilterOption;
 use crate::score::{self};
 use crate::textual_integer::TextualInteger;
 use crate::{generate_unique_address, Address};
+use crate::db_trait::Database;
 
 use chrono::Utc;
 use log::error;

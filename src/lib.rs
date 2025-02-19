@@ -6,6 +6,7 @@ pub mod score;
 pub mod service;
 pub mod user;
 pub mod textual_integer;
+pub mod db_trait;
 use uuid::Uuid;
 
 pub type Address = String;

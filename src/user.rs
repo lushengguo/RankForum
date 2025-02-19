@@ -1,5 +1,6 @@
 use crate::db::global_db;
 use crate::Address;
+use crate::db_trait::Database;
 
 pub struct User {
     pub address: Address,
