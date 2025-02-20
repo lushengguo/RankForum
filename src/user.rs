@@ -1,4 +1,4 @@
-use crate::db::global_db;
+use crate::db::default_global_db;
 use crate::Address;
 use crate::db_trait::Database;
 
@@ -13,7 +13,7 @@ impl User {
     }
 
     pub fn persist(&self) -> Result<(), String> {
-        global_db().upsert_user(self.address.clone(), self.name.clone())
+        default_global_db().upsert_user(self.address.clone(), self.name.clone())
     }
 }
 

@@ -1,5 +1,5 @@
 
-use crate::db::global_db;
+use crate::db::default_global_db;
 use crate::field::FilterOption;
 use crate::score::{self};
 use crate::textual_integer::TextualInteger;
@@ -34,8 +34,8 @@ fn inner_calculate_vote_score(
     from: &str,
     self_score: &TextualInteger,
 ) -> Result<TextualInteger, String> {
-    let field = global_db().select_field(None, Some(field_address.to_string())).unwrap();
-    let voter_score = global_db().select_score(&field.address, from);
+    let field = default_global_db().select_field(None, Some(field_address.to_string())).unwrap();
+    let voter_score = default_global_db().select_score(&field.address, from);
     let voter_level = score::level(&voter_score.score);
     let self_level = score::level(&self_score);
 
@@ -59,15 +59,15 @@ impl Comment {
     }
 
     pub fn from_db(address: Address) -> Result<Comment, String> {
-        global_db().select_comment(&address)
+        default_global_db().select_comment(&address)
     }
 
     pub fn persist(&self) -> Result<(), String> {
-        global_db().upsert_comment(self)
+        default_global_db().upsert_comment(self)
     }
 
     fn calculate_vote_score(&self, voter: &Address) -> Result<TextualInteger, String> {
-        let field = global_db().select_field(None, Some(self.field_address.clone()))?;
+        let field = default_global_db().select_field(None, Some(self.field_address.clone()))?;
         inner_calculate_vote_score(&field.address, voter, &self.score)
     }
 
@@ -79,7 +79,7 @@ impl Comment {
         }
         self.score += vote_score;
         self.upvote += 1;
-        global_db().upsert_comment(self)
+        default_global_db().upsert_comment(self)
     }
 
     pub fn downvote(&mut self, downvoter: &Address) -> Result<(), String> {
@@ -90,11 +90,11 @@ impl Comment {
         }
         self.score -= vote_score;
         self.downvote += 1;
-        global_db().upsert_comment(self)
+        default_global_db().upsert_comment(self)
     }
 
     pub fn lazy_load_comments(&mut self, option: &FilterOption) -> Result<Vec<Comment>, String> {
-        self.comments = global_db().filter_comments(&self.address, &option)?;
+        self.comments = default_global_db().filter_comments(&self.address, &option)?;
         Ok(self.comments.clone())
     }
 }
@@ -134,15 +134,15 @@ impl Post {
     }
 
     pub fn from_db(address: Address) -> Result<Post, String> {
-        global_db().select_post(&address)
+        default_global_db().select_post(&address)
     }
 
     pub fn persist(&self) -> Result<(), String> {
-        global_db().upsert_post(self)
+        default_global_db().upsert_post(self)
     }
 
     fn calculate_vote_score(&self, voter: &Address) -> Result<TextualInteger, String> {
-        let field = global_db().select_field(None, Some(self.to.clone())).unwrap();
+        let field = default_global_db().select_field(None, Some(self.to.clone())).unwrap();
         inner_calculate_vote_score(&field.address, voter, &self.score)
     }
 
@@ -154,7 +154,7 @@ impl Post {
         }
         self.score += vote_score;
         self.upvote += 1;
-        global_db().upsert_post(self)
+        default_global_db().upsert_post(self)
     }
 
     pub fn downvote(&mut self, downvoter: &Address) -> Result<(), String> {
@@ -165,11 +165,11 @@ impl Post {
         }
         self.score -= vote_score;
         self.downvote += 1;
-        global_db().upsert_post(self)
+        default_global_db().upsert_post(self)
     }
 
     pub fn lazy_load_comments(&mut self, option: &FilterOption) -> Result<Vec<Comment>, String> {
-        self.comments = global_db().filter_comments(&self.address, &option)?;
+        self.comments = default_global_db().filter_comments(&self.address, &option)?;
         Ok(self.comments.clone())
     }
 }

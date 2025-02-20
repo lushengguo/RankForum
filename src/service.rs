@@ -1,5 +1,5 @@
 use crate::crypto::*;
-use crate::db::global_db;
+use crate::db::default_global_db;
 use crate::post::*;
 use crate::user::*;
 use crate::Address;
@@ -75,7 +75,7 @@ fn query_user_address(request: &Request) -> Response {
         return Response::text("missing required parameter user_name").with_status_code(400);
     }
 
-    let user = global_db().select_user(Some(user_name), None);
+    let user = default_global_db().select_user(Some(user_name), None);
     if user.is_none() {
         return Response::text("user not found").with_status_code(404);
     }
@@ -89,7 +89,7 @@ fn query_field_address(request: &Request) -> Response {
         return Response::text("missing required parameter field_name").with_status_code(400);
     }
 
-    let field = global_db().select_field(Some(field_name), None);
+    let field = default_global_db().select_field(Some(field_name), None);
     if field.is_err() {
         return Response::text("field not found").with_status_code(404);
     }
@@ -106,17 +106,17 @@ fn query_score_in_field(request: &Request) -> Response {
         return Response::text("missing required parameter user_name or field_name").with_status_code(400);
     }
 
-    let user = global_db().select_user(Some(user_name), Some(user_address));
+    let user = default_global_db().select_user(Some(user_name), Some(user_address));
     if user.is_none() {
         return Response::text("user not found").with_status_code(404);
     }
 
-    let field = global_db().select_field(Some(field_name), Some(field_address));
+    let field = default_global_db().select_field(Some(field_name), Some(field_address));
     if field.is_err() {
         return Response::text("field not found").with_status_code(404);
     }
 
-    let score = global_db().select_score(&field.unwrap().address, &user.unwrap().address);
+    let score = default_global_db().select_score(&field.unwrap().address, &user.unwrap().address);
 
     Response::text(score.score.to_string())
 }
@@ -129,7 +129,7 @@ fn create_user(request: &Request) -> Response {
     // }
 
     // let user = User::new(user_name);
-    // global_db().update_user(&user);
+    // default_global_db().update_user(&user);
 
     Response::text("user created")
 }
@@ -137,7 +137,7 @@ fn create_user(request: &Request) -> Response {
 fn post(request: &Request) -> Response {
     let from = address(request).unwrap();
 
-    let field = match global_db().select_field(request.get_param("field_name"), request.get_param("field_address")) {
+    let field = match default_global_db().select_field(request.get_param("field_name"), request.get_param("field_address")) {
         Ok(value) => value,
         Err(_) => return Response::text("field not found").with_status_code(404),
     };
@@ -193,7 +193,7 @@ fn upvote(request: &Request) -> Response {
         None => return Response::text("missing required parameter target_address").with_status_code(400),
     };
 
-    // let post = match global_db().post(Some(target_address)) {
+    // let post = match default_global_db().post(Some(target_address)) {
     //     Some(value) => value,
     //     None => return Response::text("post not found").with_status_code(404),
     // };
@@ -210,7 +210,7 @@ fn downvote(request: &Request) -> Response {
         None => return Response::text("missing required parameter target_address").with_status_code(400),
     };
 
-    // let post = match global_db().post(Some(target_address), None) {
+    // let post = match default_global_db().post(Some(target_address), None) {
     //     Some(value) => value,
     //     None => return Response::text("post not found").with_status_code(404),
     // };

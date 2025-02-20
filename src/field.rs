@@ -1,4 +1,4 @@
-use crate::db::global_db;
+use crate::db::default_global_db;
 use crate::post::Post;
 use crate::Address;
 use crate::db_trait::Database;
@@ -28,7 +28,7 @@ pub struct FilterOption {
 
 impl Field {
     pub fn persist(&self) -> Result<(), String> {
-        global_db().insert_field(self)
+        default_global_db().insert_field(self)
     }
 
     pub fn new(name: String, address: Address) -> Field {
@@ -36,7 +36,7 @@ impl Field {
     }
 
     pub fn filter_posts(&self, option: FilterOption) -> Result<Vec<Post>, String> {
-        global_db().filter_posts(&self.name, &option)
+        default_global_db().filter_posts(&self.name, &option)
     }
 }
 

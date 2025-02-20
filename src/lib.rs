@@ -1,12 +1,13 @@
 pub mod crypto;
 pub mod db;
+pub mod db_sqlite;
+pub mod db_trait;
 pub mod field;
 pub mod post;
 pub mod score;
 pub mod service;
-pub mod user;
 pub mod textual_integer;
-pub mod db_trait;
+pub mod user;
 use uuid::Uuid;
 
 pub type Address = String;
