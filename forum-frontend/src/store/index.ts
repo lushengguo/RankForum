@@ -3,7 +3,7 @@ import authReducer from './authSlice';
 import postReducer from './postSlice';
 import fieldReducer from './fieldSlice';
 
-const store = configureStore({
+export const store = configureStore({
     reducer: {
         auth: authReducer,
         posts: postReducer,

@@ -4,7 +4,7 @@ import { Theme } from '../../utils/theme';
 
 export type InputSize = 'small' | 'medium' | 'large';
 
-interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'size'> {
     size?: InputSize;
     label?: string;
     helperText?: string;

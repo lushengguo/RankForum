@@ -106,6 +106,65 @@ export const voteAPI = {
     }
 };
 
+// 添加一个用于获取所有字段的API方法
+export const fieldAPI = {
+    getAllFields: async () => {
+        try {
+            const response = await api.get("/get_all_fields");
+            return response.data as Field[];
+        } catch (error) {
+            console.error("获取所有字段失败:", error);
+            throw error;
+        }
+    },
+    createField: async (field_name: string) => {
+        try {
+            const response = await api.post("/create_field", null, {
+                params: { field_name }
+            });
+            return response.data;
+        } catch (error) {
+            console.error("创建字段失败:", error);
+            throw error;
+        }
+    },
+    getFieldPosts: async (field_name?: string, field_address?: string) => {
+        try {
+            const response = await api.get("/get_field_posts", {
+                params: { field_name, field_address }
+            });
+            return response.data as Post[];
+        } catch (error) {
+            console.error("获取字段帖子失败:", error);
+            throw error;
+        }
+    }
+};
+
+// 添加用于获取用户信息和帖子的API方法
+export const userAPI = {
+    getCurrentUser: async () => {
+        try {
+            const response = await api.get("/user_info");
+            return response.data as User;
+        } catch (error) {
+            console.error("获取当前用户信息失败:", error);
+            throw error;
+        }
+    },
+    getUserPosts: async (user_address?: string) => {
+        try {
+            const response = await api.get("/user_posts", {
+                params: { user_address }
+            });
+            return response.data as Post[];
+        } catch (error) {
+            console.error("获取用户帖子失败:", error);
+            throw error;
+        }
+    }
+};
+
 // 查询相关API
 export const queryAPI = {
     getUserAddress: async (user_name: string) => {

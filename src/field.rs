@@ -2,8 +2,9 @@ use crate::db::default_global_db;
 use crate::post::Post;
 use crate::Address;
 use crate::db_trait::Database;
+use serde::Serialize;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize)]
 pub struct Field {
     pub name: String,
     pub address: String,

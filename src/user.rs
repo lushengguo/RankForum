@@ -1,7 +1,9 @@
 use crate::db::default_global_db;
 use crate::Address;
 use crate::db_trait::Database;
+use serde::Serialize;
 
+#[derive(Debug, PartialEq, Serialize)]
 pub struct User {
     pub address: Address,
     pub name: String,

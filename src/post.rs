@@ -6,7 +6,7 @@ use crate::{generate_unique_address, Address};
 use crate::db_trait::Database;
 
 use chrono::Utc;
-use log::error;
+use log::{error, info, warn, debug};
 use serde::Serialize;
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
@@ -34,16 +34,19 @@ fn inner_calculate_vote_score(
     from: &str,
     self_score: &TextualInteger,
 ) -> Result<TextualInteger, String> {
+    debug!("Calculating vote score for field {}, from user {}", field_address, from);
     let field = default_global_db().select_field(None, Some(field_address.to_string())).unwrap();
     let voter_score = default_global_db().select_score(&field.address, from);
     let voter_level = score::level(&voter_score.score);
     let self_level = score::level(&self_score);
-
+    
+    debug!("Vote score calculation: voter level {}, target level {}", voter_level, self_level);
     Ok(score::calculate_vote_score(self_level, voter_level))
 }
 
 impl Comment {
     pub fn new(from: Address, to: Address, content: String, field_address: Address) -> Comment {
+        debug!("Creating new comment from {} to {} in field {}", from, to, field_address);
         Comment {
             from,
             to,
@@ -54,24 +57,26 @@ impl Comment {
             timestamp: Utc::now().timestamp(),
             address: generate_unique_address(),
             field_address,
-            comments: vec![],
+            comments: Vec::new(),
         }
     }
 
     pub fn from_db(address: Address) -> Result<Comment, String> {
+        debug!("Loading comment from database, address: {}", address);
         default_global_db().select_comment(&address)
     }
 
     pub fn persist(&self) -> Result<(), String> {
+        debug!("Persisting comment with address {}", self.address);
         default_global_db().upsert_comment(self)
     }
 
     fn calculate_vote_score(&self, voter: &Address) -> Result<TextualInteger, String> {
-        let field = default_global_db().select_field(None, Some(self.field_address.clone()))?;
-        inner_calculate_vote_score(&field.address, voter, &self.score)
+        inner_calculate_vote_score(&self.field_address, voter, &self.score)
     }
 
     pub fn upvote(&mut self, upvoter: &Address) -> Result<(), String> {
+        info!("Upvoting comment {} by user {}", self.address, upvoter);
         let vote_score = self.calculate_vote_score(upvoter)?;
         if vote_score == TextualInteger::new("0") {
             error!("Vote vote_score is 0, this should not happen");
@@ -83,6 +88,7 @@ impl Comment {
     }
 
     pub fn downvote(&mut self, downvoter: &Address) -> Result<(), String> {
+        info!("Downvoting comment {} by user {}", self.address, downvoter);
         let vote_score = self.calculate_vote_score(downvoter)?;
         if vote_score == TextualInteger::new("0") {
             error!("Vote vote_score is 0, this should not happen");
@@ -94,7 +100,8 @@ impl Comment {
     }
 
     pub fn lazy_load_comments(&mut self, option: &FilterOption) -> Result<Vec<Comment>, String> {
-        self.comments = default_global_db().filter_comments(&self.address, &option)?;
+        debug!("Lazy loading comments for comment {}", self.address);
+        self.comments = default_global_db().filter_comments(&self.address, option)?;
         Ok(self.comments.clone())
     }
 }
@@ -119,6 +126,7 @@ pub struct Post {
 
 impl Post {
     pub fn new(from: Address, field_address: Address, title: String, content: String) -> Post {
+        debug!("Creating new post from {} in field {}", from, field_address);
         Post {
             address: generate_unique_address(),
             from: from.clone(),
@@ -134,30 +142,48 @@ impl Post {
     }
 
     pub fn from_db(address: Address) -> Result<Post, String> {
+        debug!("Loading post from database, address: {}", address);
         default_global_db().select_post(&address)
     }
 
     pub fn persist(&self) -> Result<(), String> {
+        debug!("Persisting post with address {}", self.address);
         default_global_db().upsert_post(self)
     }
 
     fn calculate_vote_score(&self, voter: &Address) -> Result<TextualInteger, String> {
-        let field = default_global_db().select_field(None, Some(self.to.clone())).unwrap();
-        inner_calculate_vote_score(&field.address, voter, &self.score)
+        inner_calculate_vote_score(&self.to, voter, &self.score)
     }
 
     pub fn upvote(&mut self, upvoter: &Address) -> Result<(), String> {
+        info!("Upvoting post {} by user {}", self.address, upvoter);
         let vote_score = self.calculate_vote_score(upvoter)?;
         if vote_score == TextualInteger::new("0") {
             error!("Vote vote_score is 0, this should not happen");
             return Err("Vote vote_score is 0".to_string());
         }
-        self.score += vote_score;
-        self.upvote += 1;
-        default_global_db().upsert_post(self)
+        
+        // 直接调用数据库的upvote方法
+        let result = default_global_db().upvote(upvoter, &self.address, vote_score, &self.to);
+        
+        // 更新成功后，刷新当前对象的状态
+        if result.is_ok() {
+            debug!("Post upvote successful");
+            // 从数据库重新获取最新状态
+            if let Ok(updated) = default_global_db().select_post(&self.address) {
+                self.score = updated.score;
+                self.upvote = updated.upvote;
+                self.downvote = updated.downvote;
+            }
+        } else {
+            warn!("Post upvote failed: {}", result.as_ref().unwrap_err());
+        }
+        
+        result
     }
 
     pub fn downvote(&mut self, downvoter: &Address) -> Result<(), String> {
+        info!("Downvoting post {} by user {}", self.address, downvoter);
         let vote_score = self.calculate_vote_score(downvoter)?;
         if vote_score == TextualInteger::new("0") {
             error!("Vote vote_score is 0, this should not happen");
@@ -169,7 +195,8 @@ impl Post {
     }
 
     pub fn lazy_load_comments(&mut self, option: &FilterOption) -> Result<Vec<Comment>, String> {
-        self.comments = default_global_db().filter_comments(&self.address, &option)?;
+        debug!("Lazy loading comments for post {}", self.address);
+        self.comments = default_global_db().filter_comments(&self.address, option)?;
         Ok(self.comments.clone())
     }
 }

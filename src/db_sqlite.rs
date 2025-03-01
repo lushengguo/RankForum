@@ -9,7 +9,7 @@ use crate::user::*;
 use crate::Address;
 
 use lazy_static::lazy_static;
-use log::{error, info, warn};
+use log::{error, info, warn, debug};
 use rusqlite::{params, params_from_iter, Connection, Result};
 use std::sync::{Arc, Mutex};
 
@@ -21,6 +21,7 @@ lazy_static! {
     static ref STATIC_DB: Arc<Sqlite> = {
         let db = Sqlite::new("database.sqlite").expect("Failed to initialize database");
         db.init().expect("Failed to initialize database schema");
+        info!("SQLite database initialized successfully");
         Arc::new(db)
     };
 }
@@ -31,6 +32,7 @@ pub fn global_db() -> Arc<dyn Database> {
 
 impl Sqlite {
     fn new(path: &str) -> Result<Self> {
+        debug!("Opening SQLite database at {}", path);
         let conn = Connection::open(path)?;
         Ok(Sqlite { conn: Mutex::new(conn) })
     }
@@ -42,10 +44,14 @@ impl Sqlite {
         voted_score: TextualInteger,
         field_address: &str,
     ) -> Result<(), String> {
+        debug!("Processing vote from {} to {} in field {}", from, to, field_address);
         let mut score = self.select_score(to, field_address);
 
         let mut db = self.conn.lock().unwrap();
-        let tx = db.transaction().map_err(|e| e.to_string())?;
+        let tx = db.transaction().map_err(|e| {
+            error!("Failed to start transaction: {}", e);
+            e.to_string()
+        })?;
 
         match tx.query_row(
             "SELECT voted_score FROM votes WHERE from_address = ?1 AND to_address = ?2",
@@ -57,6 +63,7 @@ impl Sqlite {
         ) {
             Ok(history_voted_score) => {
                 if history_voted_score.is_positive() == voted_score.is_positive() {
+                    debug!("User {} already voted on {}", from, to);
                     return Err("Already voted".to_string());
                 } else {
                     tx.execute(
@@ -80,24 +87,31 @@ impl Sqlite {
             }
             Err(_) => {
                 tx.execute(
-                    "INSERT OR REPLACE INTO votes (from_address, to_address, voted_score) 
-            VALUES (?1, ?2, ?3)",
+                    "INSERT INTO votes (from_address, to_address, voted_score) VALUES (?1, ?2, ?3)",
                     params![from, to, voted_score.to_string()],
                 )
-                .map_err(|err| err.to_string())?;
-
+                .map_err(|e| {
+                    error!("Failed to insert vote: {}", e);
+                    e.to_string()
+                })?;
+                
                 if voted_score.is_positive() {
                     score.upvote += 1;
                 } else {
                     score.downvote += 1;
                 }
+                
                 score.score += voted_score;
                 self.update_score(&score, &tx)?;
             }
-        };
-
-        tx.commit().map_err(|err| err.to_string())?;
-
+        }
+        
+        tx.commit().map_err(|e| {
+            error!("Failed to commit transaction: {}", e);
+            e.to_string()
+        })?;
+        
+        debug!("Vote from {} to {} processed successfully", from, to);
         Ok(())
     }
 
@@ -499,6 +513,7 @@ impl Database for Sqlite {
         voted_score: TextualInteger,
         field_address: &str,
     ) -> Result<(), String> {
+        debug!("Processing upvote from {} to {} in field {}", from, to, field_address);
         self.vote(from, to, voted_score, field_address)
     }
 
@@ -510,10 +525,12 @@ impl Database for Sqlite {
         voted_score: TextualInteger,
         field_address: &str,
     ) -> Result<(), String> {
+        debug!("Processing downvote from {} to {} in field {}", from, to, field_address);
         self.vote(from, to, voted_score, field_address)
     }
 
     fn upsert_user(&self, address: Address, name: String) -> Result<(), String> {
+        debug!("Upserting user with address {} and name {}", address, name);
         let name_exists: bool = self
             .conn
             .lock()

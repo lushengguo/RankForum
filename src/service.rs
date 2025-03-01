@@ -12,6 +12,7 @@ use std::sync::Mutex;
 use crate::db_trait::Database;
 use crate::generate_unique_address;
 use serde_json;
+use log::{info, warn, error, debug};
 
 lazy_static! {
     static ref GLOBAL_SESSION_STORGE: Mutex<HashMap<String, SessionStorage>> = Mutex::new(HashMap::new());
@@ -23,57 +24,126 @@ pub struct SessionStorage {
     address: Address,
 }
 
+// Add CORS headers helper function
+fn add_cors_headers(response: Response) -> Response {
+    debug!("Adding CORS headers");
+    response.with_additional_header("Access-Control-Allow-Origin", "*")
+           .with_additional_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+           .with_additional_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, SID")
+           .with_additional_header("Access-Control-Max-Age", "86400")
+}
+
 pub fn handle_route(request: &Request) -> Response {
+    debug!("Processing request: {} {}", request.method(), request.url());
+    
+    // Handle preflight requests
+    if request.method() == "OPTIONS" {
+        info!("Received CORS preflight request");
+        return add_cors_headers(Response::empty_204());
+    }
+    
+    // Check user login
     if request.url() != "login" && request.method() == "POST" && !user_already_logined(request) {
-        return rouille::Response::text("please login first").with_status_code(401);
+        warn!("Unauthorized user attempted to access protected endpoint");
+        return add_cors_headers(rouille::Response::text("please login first").with_status_code(401));
     }
 
-    router!(request,
+    // Build normal response
+    let response = router!(request,
         (POST) (/login) => {
+            info!("Received login request");
             login(request)
         },
         (POST) (/post) => {
+            info!("Received post creation request");
             post(request)
         },
         (POST) (/comment) => {
+            info!("Received comment request");
             comment(request)
         },
         (GET) (/filter_post) => {
+            debug!("Filtering posts");
             filter_post(request)
         },
         (POST) (/rename_user) => {
+            info!("Received rename request");
             user_rename(request)
         },
         (POST) (/create_user) => {
+            info!("Received user creation request");
             create_user(request)
         },
         (POST) (/upvote) => {
+            debug!("Received upvote request");
             upvote(request)
         },
         (POST) (/downvote) => {
+            debug!("Received downvote request");
             downvote(request)
         },
         (GET) (/query_user_address) => {
+            debug!("Querying user address");
             query_user_address(request)
         },
         (GET) (/query_field_address) => {
+            debug!("Querying field address");
             query_field_address(request)
         },
         (GET) (/query_score_in_field) => {
+            debug!("Querying score in field");
             query_score_in_field(request)
         },
-        _ => rouille::Response::empty_404()
-    )
+        (POST) (/create_field) => {
+            info!("Creating new field");
+            create_field(request)
+        },
+        (GET) (/get_all_fields) => {
+            debug!("Getting all fields");
+            get_all_fields(request)
+        },
+        (GET) (/get_field_posts) => {
+            debug!("Getting field posts");
+            get_field_posts(request)
+        },
+        (GET) (/user_info) => {
+            debug!("Getting user info");
+            get_user_info(request)
+        },
+        (GET) (/user_posts) => {
+            debug!("Getting user posts");
+            get_user_posts(request)
+        },
+        _ => {
+            warn!("Unknown route: {} {}", request.method(), request.url());
+            rouille::Response::empty_404()
+        }
+    );
+    
+    // Add CORS headers to all responses
+    add_cors_headers(response)
 }
 
 fn get_session_cache(request: &Request) -> Option<SessionStorage> {
     let sid = match request.get_param("SID") {
         Some(sid) => sid,
-        None => return None,
+        None => {
+            debug!("Request has no session ID");
+            return None;
+        },
     };
 
     let sessions_storage = GLOBAL_SESSION_STORGE.lock().unwrap();
-    sessions_storage.get(&sid).cloned()
+    match sessions_storage.get(&sid) {
+        Some(cache) => {
+            debug!("Found session: {}", sid);
+            Some(cache.clone())
+        },
+        None => {
+            debug!("Session does not exist: {}", sid);
+            None
+        }
+    }
 }
 
 fn address(request: &Request) -> Option<Address> {
@@ -207,6 +277,19 @@ fn comment(request: &Request) -> Response {
 }
 
 fn filter_post(request: &Request) -> Response {
+    if let Some(post_address) = request.get_param("post_address") {
+        match default_global_db().select_post(&post_address) {
+            Ok(post) => {
+                match serde_json::to_string(&vec![post]) {
+                    Ok(json) => return Response::text(json)
+                        .with_additional_header("Content-Type", "application/json"),
+                    Err(_) => return Response::text("failed to serialize post data").with_status_code(500),
+                }
+            }
+            Err(_) => return Response::text("post not found").with_status_code(404),
+        }
+    }
+
     let field_name = request.get_param("field_name");
     let field_address = request.get_param("field_address");
 
@@ -243,7 +326,8 @@ fn filter_post(request: &Request) -> Response {
     match field.filter_posts(option) {
         Ok(posts) => {
             match serde_json::to_string(&posts) {
-                Ok(json) => Response::text(json),
+                Ok(json) => Response::text(json)
+                    .with_additional_header("Content-Type", "application/json"),
                 Err(_) => Response::text("failed to serialize posts").with_status_code(500),
             }
         }
@@ -252,19 +336,24 @@ fn filter_post(request: &Request) -> Response {
 }
 
 fn upvote(request: &Request) -> Response {
-    let address = address(request).unwrap();
+    let address = match address(request) {
+        Some(addr) => addr,
+        None => {
+            warn!("Unauthorized upvote request");
+            return Response::text("Unauthorized operation").with_status_code(401);
+        }
+    };
 
     let target_address = match request.get_param("target_address") {
         Some(value) => value,
-        None => return Response::text("missing required parameter target_address").with_status_code(400),
+        None => {
+            warn!("Upvote request missing target_address");
+            return Response::text("missing required parameter target_address").with_status_code(400);
+        },
     };
 
-    let field_address = match request.get_param("field_address") {
-        Some(value) => value,
-        None => return Response::text("missing required parameter field_address").with_status_code(400),
-    };
-
-    // Try to handle post upvote first
+    debug!("User {} attempting to upvote {}", address, target_address);
+    
     match default_global_db().select_post(&target_address) {
         Ok(mut post) => {
             match post.upvote(&address) {
@@ -273,7 +362,6 @@ fn upvote(request: &Request) -> Response {
             }
         },
         Err(_) => {
-            // If not a post, try to handle as comment
             match Comment::from_db(target_address) {
                 Ok(mut comment) => {
                     match comment.upvote(&address) {
@@ -288,19 +376,24 @@ fn upvote(request: &Request) -> Response {
 }
 
 fn downvote(request: &Request) -> Response {
-    let address = address(request).unwrap();
+    let address = match address(request) {
+        Some(addr) => addr,
+        None => {
+            warn!("Unauthorized downvote request");
+            return Response::text("Unauthorized operation").with_status_code(401);
+        }
+    };
 
     let target_address = match request.get_param("target_address") {
         Some(value) => value,
-        None => return Response::text("missing required parameter target_address").with_status_code(400),
+        None => {
+            warn!("Downvote request missing target_address");
+            return Response::text("missing required parameter target_address").with_status_code(400);
+        },
     };
 
-    let field_address = match request.get_param("field_address") {
-        Some(value) => value,
-        None => return Response::text("missing required parameter field_address").with_status_code(400),
-    };
-
-    // Try to handle post downvote first
+    debug!("User {} attempting to downvote {}", address, target_address);
+    
     match default_global_db().select_post(&target_address) {
         Ok(mut post) => {
             match post.downvote(&address) {
@@ -309,7 +402,6 @@ fn downvote(request: &Request) -> Response {
             }
         },
         Err(_) => {
-            // If not a post, try to handle as comment
             match Comment::from_db(target_address) {
                 Ok(mut comment) => {
                     match comment.downvote(&address) {
@@ -324,36 +416,67 @@ fn downvote(request: &Request) -> Response {
 }
 
 fn login(request: &Request) -> Response {
-    let body = input::plain_text_body(request).unwrap();
-    let json_body: serde_json::Value = serde_json::from_str(&body).unwrap();
-    let pubkey = match json_body.get("pubkey") {
-        Some(pubkey) => pubkey.as_str().unwrap(),
-        None => return Response::text("pubkey field is needed in http body").with_status_code(400),
+    let body = match input::plain_text_body(request) {
+        Ok(body) => body,
+        Err(e) => {
+            error!("Failed to read login request body: {:?}", e);
+            return Response::text("Unable to read request body").with_status_code(400);
+        },
     };
+    
+    let json_body: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(json) => json,
+        Err(e) => {
+            error!("Failed to parse login request JSON: {:?}", e);
+            return Response::text("Request body must be valid JSON").with_status_code(400);
+        },
+    };
+    
+    let pubkey = match json_body.get("pubkey") {
+        Some(pubkey) => match pubkey.as_str() {
+            Some(str) => str,
+            None => return Response::text("pubkey must be a string").with_status_code(400),
+        },
+        None => return Response::text("HTTP request body must contain pubkey field").with_status_code(400),
+    };
+    
     let signed_pubkey = match json_body.get("signed_pubkey") {
-        Some(signed_pubkey) => signed_pubkey.as_str().unwrap(),
-        None => return Response::text("signed_pubkey field is needed in http body").with_status_code(400),
+        Some(signed_pubkey) => match signed_pubkey.as_str() {
+            Some(str) => str,
+            None => return Response::text("signed_pubkey must be a string").with_status_code(400), 
+        },
+        None => return Response::text("HTTP request body must contain signed_pubkey field").with_status_code(400),
     };
 
-    let pubkey_bytes = BASE64_STANDARD.decode(pubkey).unwrap();
-    let signed_pubkey_bytes = BASE64_STANDARD.decode(signed_pubkey).unwrap();
+    let pubkey_bytes = match BASE64_STANDARD.decode(pubkey) {
+        Ok(bytes) => bytes,
+        Err(_) => return Response::text("pubkey must be valid Base64 encoding").with_status_code(400),
+    };
+    
+    let signed_pubkey_bytes = match BASE64_STANDARD.decode(signed_pubkey) {
+        Ok(bytes) => bytes,
+        Err(_) => return Response::text("signed_pubkey must be valid Base64 encoding").with_status_code(400),
+    };
 
     match verify_signature(&pubkey_bytes, &signed_pubkey_bytes, &pubkey_bytes) {
         true => {
-            // Generate a unique session ID
             let sid = generate_unique_address();
             
-            // Store session information
             let mut sessions_storage = GLOBAL_SESSION_STORGE.lock().unwrap();
             sessions_storage.insert(sid.clone(), SessionStorage {
                 logined: true,
                 address: pubkey.to_string(),
             });
             
+            if default_global_db().select_user(None, Some(pubkey.to_string())).is_none() {
+                let default_name = format!("User_{}", &pubkey[0..8]);
+                let _ = User::new(pubkey.to_string(), default_name).persist();
+            }
+            
             Response::text(format!("login successful, SID={}", sid))
         },
         false => {
-            Response::text("cannot verify signature, please encrypt your address with secret key").with_status_code(401)
+            Response::text("Unable to verify signature, please encrypt your address with your private key").with_status_code(401)
         }
     }
 }
@@ -365,5 +488,132 @@ fn user_rename(request: &Request) -> Response {
             Err(detail) => Response::text(detail).with_status_code(400),
         },
         _ => Response::text("missing required parameter name or address").with_status_code(400),
+    }
+}
+
+fn create_field(request: &Request) -> Response {
+    let address = address(request).unwrap();
+    
+    let field_name = match request.get_param("field_name") {
+        Some(value) => value,
+        None => return Response::text("missing required parameter field_name").with_status_code(400),
+    };
+    
+    if field_name.is_empty() {
+        return Response::text("field_name should not be empty").with_status_code(400);
+    }
+    
+    let field_address = crate::generate_unique_address();
+    let field = Field::new(field_name, field_address);
+    
+    match field.persist() {
+        Ok(_) => Response::text("field created successfully"),
+        Err(e) => Response::text(e).with_status_code(400),
+    }
+}
+
+fn get_all_fields(request: &Request) -> Response {
+    let fields = default_global_db().select_all_fields();
+    
+    match serde_json::to_string(&fields) {
+        Ok(json) => Response::text(json)
+            .with_additional_header("Content-Type", "application/json"),
+        Err(_) => Response::text("failed to serialize fields data").with_status_code(500),
+    }
+}
+
+fn get_field_posts(request: &Request) -> Response {
+    let field_name = request.get_param("field_name");
+    let field_address = request.get_param("field_address");
+    
+    if field_name.is_none() && field_address.is_none() {
+        return Response::text("missing required parameter: field_name or field_address").with_status_code(400);
+    }
+    
+    let field = match default_global_db().select_field(field_name, field_address) {
+        Ok(value) => value,
+        Err(_) => return Response::text("field not found").with_status_code(404),
+    };
+    
+    let option = FilterOption {
+        level: None,
+        keyword: None,
+        ordering: Ordering::ByTimestamp,
+        ascending: false,
+        max_results: 100,
+    };
+    
+    match field.filter_posts(option) {
+        Ok(posts) => {
+            match serde_json::to_string(&posts) {
+                Ok(json) => Response::text(json)
+                    .with_additional_header("Content-Type", "application/json"),
+                Err(_) => Response::text("failed to serialize posts").with_status_code(500),
+            }
+        }
+        Err(e) => Response::text(e).with_status_code(400),
+    }
+}
+
+fn get_user_info(request: &Request) -> Response {
+    let user_address = match address(request) {
+        Some(addr) => addr,
+        None => return Response::text("User not logged in").with_status_code(401),
+    };
+    
+    let user = match default_global_db().select_user(None, Some(user_address.clone())) {
+        Some(user) => user,
+        None => {
+            return Response::text(format!("User does not exist, address: {}", user_address))
+                .with_status_code(404);
+        }
+    };
+    
+    match serde_json::to_string(&user) {
+        Ok(json) => Response::text(json)
+            .with_additional_header("Content-Type", "application/json"),
+        Err(_) => Response::text("Failed to serialize user data").with_status_code(500),
+    }
+}
+
+fn get_user_posts(request: &Request) -> Response {
+    let user_address = match request.get_param("user_address") {
+        Some(addr) => addr,
+        None => {
+            match address(request) {
+                Some(addr) => addr,
+                None => return Response::text("No user address provided and not logged in").with_status_code(400),
+            }
+        }
+    };
+    
+    let fields = default_global_db().select_all_fields();
+    let mut all_user_posts: Vec<Post> = Vec::new();
+    
+    for field in fields {
+        let option = FilterOption {
+            level: None,
+            keyword: None,
+            ordering: Ordering::ByTimestamp,
+            ascending: false,
+            max_results: 1000,
+        };
+        
+        if let Ok(posts) = field.filter_posts(option) {
+            let user_posts: Vec<Post> = posts
+                .into_iter()
+                .filter(|post| post.from == user_address)
+                .collect();
+            
+            all_user_posts.extend(user_posts);
+        }
+    }
+    
+    all_user_posts.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    
+    match serde_json::to_string(&all_user_posts) {
+        Ok(json) => Response::text(json)
+            .with_additional_header("Content-Type", "application/json"),
+        Err(_) => Response::text("Failed to serialize posts data").with_status_code(500),
     }
 }
