@@ -1,4 +1,3 @@
-
 use crate::db::default_global_db;
 use crate::field::FilterOption;
 use crate::score::{self};
@@ -8,8 +7,9 @@ use crate::db_trait::Database;
 
 use chrono::Utc;
 use log::error;
+use serde::Serialize;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct Comment {
     pub address: Address,
     pub from: Address,
@@ -99,7 +99,7 @@ impl Comment {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct Post {
     pub address: Address,
     pub from: Address,
